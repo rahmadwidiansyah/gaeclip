@@ -36,6 +36,9 @@ def _dpapi_protect(data: bytes) -> bytes | None:
                         ("pbData", ctypes.POINTER(ctypes.c_char))]
 
         crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        kernel32.LocalFree.restype = ctypes.c_void_p
         buffer_in = ctypes.create_string_buffer(data)
         blob_in = DATA_BLOB(len(data), ctypes.cast(buffer_in, ctypes.POINTER(ctypes.c_char)))
         blob_out = DATA_BLOB()
@@ -46,7 +49,9 @@ def _dpapi_protect(data: bytes) -> bytes | None:
         try:
             return ctypes.string_at(blob_out.pbData, blob_out.cbData)
         finally:
-            crypt32.LocalFree(blob_out.pbData)
+            # LocalFree lives in kernel32, NOT crypt32 (using crypt32
+            # raises AttributeError and silently disables DPAPI).
+            kernel32.LocalFree(blob_out.pbData)
     except Exception:
         logger.warning("DPAPI protect unavailable, using key file", exc_info=True)
         return None
@@ -64,6 +69,9 @@ def _dpapi_unprotect(data: bytes) -> bytes | None:
                         ("pbData", ctypes.POINTER(ctypes.c_char))]
 
         crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        kernel32.LocalFree.restype = ctypes.c_void_p
         buffer_in = ctypes.create_string_buffer(data)
         blob_in = DATA_BLOB(len(data), ctypes.cast(buffer_in, ctypes.POINTER(ctypes.c_char)))
         blob_out = DATA_BLOB()
@@ -74,7 +82,9 @@ def _dpapi_unprotect(data: bytes) -> bytes | None:
         try:
             return ctypes.string_at(blob_out.pbData, blob_out.cbData)
         finally:
-            crypt32.LocalFree(blob_out.pbData)
+            # LocalFree lives in kernel32, NOT crypt32 (using crypt32
+            # raises AttributeError and silently disables DPAPI).
+            kernel32.LocalFree(blob_out.pbData)
     except Exception:
         logger.warning("DPAPI unprotect unavailable", exc_info=True)
         return None

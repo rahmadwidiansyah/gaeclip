@@ -88,6 +88,16 @@ fn sidecar_env(storage: &Path) -> HashMap<String, String> {
 
 fn main() {
     tauri::Builder::default()
+        // Must be registered FIRST: a second launch exits here and only
+        // focuses the running window, instead of spawning duplicate
+        // sidecars that fight over ports 3000/8000 (EADDRINUSE force-close).
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
