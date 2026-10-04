@@ -5,7 +5,7 @@
   "identifier": "id.gaeclip.desktop",
   "build": {
     "devUrl": "http://localhost:3000",
-    "frontendDist": "../frontend/.next/standalone"
+    "frontendDist": "../frontend/public"
   },
   "app": {
     "windows": [
