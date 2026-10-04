@@ -68,8 +68,20 @@ jobs:
 
       - name: Build backend exe (PyInstaller, onedir)
         run: |
+          # NOTE: size is not a concern — correctness first. Everything the
+          # pipeline can touch rides along, including dynamic imports that
+          # PyInstaller's static analysis cannot see (__import__(name)):
+          # mediapipe/ultralytics (via vision_adapters._require), the full
+          # Whisper stack, and cv2 data files.
           pyinstaller --noconfirm --onedir --name gaeclip-api `
             --collect-all gaeclip `
+            --collect-all mediapipe `
+            --collect-all ultralytics `
+            --collect-all opencv-python-headless `
+            --collect-all faster_whisper `
+            --collect-all ctranslate2 `
+            --collect-all onnxruntime `
+            --collect-all tokenizers `
             -p src src/gaeclip/desktop.py
           New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
           # Tauri externalBin paths resolve under src-tauri/, and the file
