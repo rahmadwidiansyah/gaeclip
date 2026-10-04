@@ -29,12 +29,12 @@
     "resources": {
       "../frontend/.next/standalone": "frontend/",
       "../frontend/.next/static": "frontend/.next/static",
-      "../bin/ffmpeg.exe": "bin/",
-      "../bin/deno.exe": "bin/",
-      "../bin/node.exe": "bin/",
-      "../models/blaze_face_short_range.tflite": "models/",
-      "../models/yolo26n-face.pt": "models/",
-      "../models/pretrain_TalkSet.model": "models/"
+      "../bin/ffmpeg.exe": "bin/ffmpeg.exe",
+      "../bin/deno.exe": "bin/deno.exe",
+      "../bin/node.exe": "bin/node.exe",
+      "../models/blaze_face_short_range.tflite": "models/blaze_face_short_range.tflite",
+      "../models/yolo26n-face.pt": "models/yolo26n-face.pt",
+      "../models/pretrain_TalkSet.model": "models/pretrain_TalkSet.model"
     },
     "externalBin": ["binaries/gaeclip-api"]
   },
