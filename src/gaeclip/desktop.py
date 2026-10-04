@@ -14,8 +14,11 @@ import sys
 
 def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("GAECLIP_RUNTIME", "desktop")
-    from .runtime.cookies import export_cookies_file
-    from .runtime.secrets import ensure_desktop_secret
+    # Absolute imports: PyInstaller runs this file as a top-level script
+    # (__main__), where relative imports fail. Works identically under
+    # `python -m gaeclip.desktop`.
+    from gaeclip.runtime.cookies import export_cookies_file
+    from gaeclip.runtime.secrets import ensure_desktop_secret
 
     try:
         ensure_desktop_secret()
