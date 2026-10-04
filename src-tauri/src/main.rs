@@ -145,6 +145,19 @@ fn main() {
                     e
                 })?;
             log_line(&log, "spawning node frontend...");
+            log_line(&log, &format!("node = {} (exists={})", node.display(), node.is_file()));
+            log_line(
+                &log,
+                &format!("server.js = {} (exists={})", server_js.display(), server_js.is_file()),
+            );
+            log_line(
+                &log,
+                &format!(
+                    "frontend dir = {} (exists={})",
+                    frontend_dir.display(),
+                    frontend_dir.is_dir()
+                ),
+            );
             let (mut rx_web, _child_web) = app
                 .shell()
                 .command(node.to_string_lossy().as_ref())
