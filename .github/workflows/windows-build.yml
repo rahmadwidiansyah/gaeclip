@@ -71,8 +71,11 @@ jobs:
 
       - name: Build frontend + Tauri installer
         run: |
-          npm --prefix frontend install
-          npm --prefix frontend run build
+          $ErrorActionPreference = "Stop"
+          Push-Location frontend
+          npm install
+          npm run build
+          Pop-Location
           npx --yes @tauri-apps/cli build --bundles nsis
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
