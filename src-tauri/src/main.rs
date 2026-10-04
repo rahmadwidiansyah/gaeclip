@@ -13,6 +13,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
+use tauri::path::BaseDirectory;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
@@ -66,15 +67,15 @@ fn main() {
             // 2. Frontend: Next.js standalone served by bundled node.
             let node = app
                 .path()
-                .resolve_resource("bin/node.exe")
+                .resolve("bin/node.exe", BaseDirectory::Resource)
                 .expect("node sidecar resource missing");
             let server_js = app
                 .path()
-                .resolve_resource("frontend/server.js")
+                .resolve("frontend/server.js", BaseDirectory::Resource)
                 .expect("frontend server.js missing");
             let frontend_dir = app
                 .path()
-                .resolve_resource("frontend")
+                .resolve("frontend", BaseDirectory::Resource)
                 .expect("frontend resource missing");
             let (mut rx_web, _child_web) = app
                 .shell()
