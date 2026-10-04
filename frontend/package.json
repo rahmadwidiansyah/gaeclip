@@ -1,0 +1,23 @@
+{
+  "name": "gaeclip-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "test": "node --experimental-strip-types --test app/lib/format.test.ts app/lib/subtitles.test.ts app/lib/clips.test.ts app/lib/icons.test.ts app/lib/ai-models.test.ts app/lib/ai-providers.test.ts app/lib/settings-nav.test.ts",
+    "start": "next start -p 3000"
+  },
+  "dependencies": {
+    "lucide-react": "^1.48.0",
+    "next": "^15.5.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "typescript": "^5.8.0"
+  }
+}

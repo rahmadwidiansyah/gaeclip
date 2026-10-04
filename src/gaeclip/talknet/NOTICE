@@ -1,0 +1,20 @@
+TalkNet architecture vendored from TalkNet-ASD
+=============================================
+
+Files under `gaeclip/talknet/_upstream/` (attentionLayer.py,
+audioEncoder.py, visualEncoder.py, talkNetModel.py) are adapted from the
+TalkNet-ASD repository:
+
+    https://github.com/TaoRuijie/TalkNet-ASD
+
+Copyright (c) 2021 Tao Ruijie, MIT License. Only the module import lines
+were changed (absolute `model.*` imports rewritten to the vendored
+package path); the network architecture is byte-identical so the upstream
+`pretrain_TalkSet.model` checkpoint loads without conversion.
+
+Preprocessing (MFCC parameters, 112x112 face crops, 25 fps windowing)
+follows the upstream dataLoader/demo conventions, reimplemented with
+numpy/OpenCV only (no python_speech_features / scipy dependency).
+
+Everything outside `_upstream/` (device detection, batching, cache,
+escalation, fusion, pipeline integration) is original Gaeclip code.

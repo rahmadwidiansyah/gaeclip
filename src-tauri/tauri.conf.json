@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Gaeclip",
+  "version": "0.1.0",
+  "identifier": "id.gaeclip.desktop",
+  "build": {
+    "devUrl": "http://localhost:3000",
+    "frontendDist": "../frontend/.next/standalone"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Gaeclip",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "url": "http://127.0.0.1:3000"
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "icon": ["icons/icon.ico"],
+    "category": "Video",
+    "shortDescription": "YouTube auto-shorts generator (offline desktop)",
+    "resources": {
+      "../frontend/.next/standalone": "frontend/",
+      "../frontend/.next/static": "frontend/.next/static",
+      "../bin/ffmpeg.exe": "bin/",
+      "../bin/deno.exe": "bin/",
+      "../bin/node.exe": "bin/",
+      "../models/blaze_face_short_range.tflite": "models/",
+      "../models/yolo26n-face.pt": "models/",
+      "../models/TalkNet-ASD/pretrain_TalkSet.model": "models/TalkNet-ASD/"
+    },
+    "externalBin": ["binaries/gaeclip-api"]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYyOUI0OTQ4NTdDOUI0MDQKUldRRXRNbFhTRW1iOHIzQXpOTGowdXdJVDl1TnNXbllCbCtiMWNSR0NqeTUxWTBmR1pEeGd1WFIK",
+      "endpoints": [
+        "https://github.com/rahmadwidiansyah/gaeclip/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

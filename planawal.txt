@@ -1,0 +1,235 @@
+Maafkan saya, di respon sebelumnya saya sempat agak melenceng mengira arahnya ke pembuatan *avatar* lip-sync. Sekarang saya sudah paham **100% visi utuhmu**: Kamu ingin membuat platform **Auto-Shorts Generator (seperti OpusClip/Vizard)** dari link YouTube, dilengkapi dengan **Active Speaker Detection berbasis Gerak Bibir** dan aturan **Jeda 2 Detik (Hysteresis)** agar perpindahan kamera tidak pusing.
+
+Ini adalah ide SaaS/Project bernilai tinggi. Kunci efisiensi sistem ini adalah: **Analisis teks dulu, potong video kasarnya, BARU lakukan analisis wajah/bibir di klip pendeknya saja (bukan di video 1 jam full).** Ini akan sangat menghemat biaya server/GPU.
+
+Berikut adalah **Master Plan, Arsitektur, Pipeline, dan Roadmap** lengkap dari detik pertama user memasukkan link:
+
+---
+
+### 1. ARSITEKTUR SISTEM (High-Level)
+
+* **Frontend (Web/App):** React.js / Next.js. User interface sederhana: Form input link YT, status progress, dan dashboard hasil klip.
+* **API Gateway:** FastAPI (Python). Menerima link, mengatur antrean (*queue*).
+* **Task Queue:** Redis + Celery. Wajib ada karena memproses video butuh waktu menit-an.
+* **Worker Node (CPU/GPU):** Mesin yang menjalankan yt-dlp, FFmpeg, Whisper, dan YOLO/TalkNet.
+
+---
+
+### 2. PIPELINE END-TO-END (Alur Proses Detail)
+
+**FASE A: TEKS & KURASI (Hemat Biaya)**
+**Step 1: Ingestion (User Input)**
+
+* User memasukkan URL YouTube (misal podcast 1 jam).
+* Sistem mengecek metadata video (resolusi, durasi) via `yt-dlp`.
+
+**Step 2: Subtitle Extraction & Fallback**
+
+* Sistem mencoba download Auto-Subtitle dari YouTube via `yt-dlp`.
+* *Fallback:* Jika tidak ada subtitle, sistem download audio saja (`.m4a`), lalu diproses menggunakan **Whisper AI** (model `faster-whisper` di server) untuk generate file SRT/VTT.
+* **Pre-processing:** File subtitle dibersihkan dan diberi **Line ID** per baris agar AI tidak halusinasi soal *timestamp*.
+
+**Step 3: AI Viral Analysis (LLM Curation)**
+
+* Teks subtitle utuh dikirim ke LLM (Gemini 1.5 Flash / GPT-4o-mini).
+* LLM diinstruksikan mencari 3-5 *hook* terbaik dan mengembalikan JSON berisi `start_line_id`, `end_line_id`, judul, dan skor viral.
+
+**FASE B: VIDEO & VISUAL AI (Heavy Lifting)**
+**Step 4: Raw Clip Extraction (Smart Cut)**
+
+* Berdasarkan ID Line dari LLM, Backend mencari *timestamp* asli (plus *buffer* 1-2 detik di awal/akhir).
+* `yt-dlp` + `ffmpeg` mendownload **hanya** rentang waktu tersebut (misal cuma menit 12:00 - 13:00) dari YouTube. *Kita tidak mendownload video 1 jam full!*
+
+**Step 5: Active Speaker Detection (Lip Movement + Face Tracking)**
+
+* Klip mentah (60 detik) dimasukkan ke pipeline Computer Vision:
+1. **YOLOv8 Face:** Mendeteksi ada berapa wajah di dalam *frame* dan mencatat koordinat (X, Y) masing-masing wajah di setiap *frame*.
+2. **SyncNet / Lip Movement Detection:** Mengekstrak area mulut dari wajah yang terdeteksi, lalu membandingkannya dengan *audio track*. Sistem akan memberi skor *Confidence*: "Wajah A bibirnya bergerak sesuai audio, Wajah B diam".
+
+
+
+**Step 6: Logika "Jeda 2 Detik" (Hysteresis & Layouting)**
+
+* Data dari Step 5 dievaluasi oleh skrip Python untuk menentukan layout kamera (misal target video vertikal 9:16).
+* **Logika 2 Detik:**
+* Jika Host bicara $\rightarrow$ Kamera fokus / crop ke Host.
+* Tamu menyela dengan kata "Oh gitu" (0.5 detik), lalu Host lanjut bicara $\rightarrow$ **Kamera abaikan Tamu**, tetap fokus ke Host (karena Tamu bicara kurang dari 2 detik).
+* Tamu mulai menjelaskan panjang lebar (lebih dari 2 detik) $\rightarrow$ Kamera melakukan *Hard Cut* (pindah crop) ke arah Tamu.
+
+
+* Jika 2 orang tertawa bersama/bicara bersama lama $\rightarrow$ Skrip memerintahkan layout diubah ke **Split-Screen** (Atas-Bawah).
+
+**Step 7: Final Rendering & Subtitle Burn-in**
+
+* Skrip Python menghasilkan file instruksi filter kompleks untuk FFmpeg (berisi koordinat crop dinamis dan perpindahan adegan).
+* `ffmpeg` memproses video raw tadi: melakukan crop 9:16 yang dinamis, menambahkan warna, dan menempelkan (*burn-in*) subtitle gaya TikTok (font besar, warna-warni per kata).
+* Output MP4 final di-upload ke Cloud Storage (S3) dan link-nya dikirim ke UI User.
+
+---
+
+### 3. REKOMENDASI TECH STACK (Spesifik untuk Project Ini)
+
+* **Backend & Orchestration:** Python, FastAPI, Celery, Redis.
+* **Downloader & Processor:** `yt-dlp`, `ffmpeg` (mutlak wajib).
+* **Kurasi Teks (LLM):** Gemini 1.5 Flash (Sangat murah, context window 1M token, cukup untuk transkrip podcast 3 jam sekaligus).
+* **AI Visual & Audio (Worker):**
+* *Face Detection:* YOLOv8-face / MediaPipe Face.
+* *Lip/Active Speaker Detection:* TalkNet-ASD (Active Speaker Detection) atau SyncNet.
+* *Transcription Fallback:* `faster-whisper`.
+
+
+* **Subtitle Rendering:** Pysubs2 (untuk generate format ASS otomatis dengan highlight warna per kata) lalu diumpan ke filter `subtitles` di FFmpeg.
+
+---
+
+### 4. ROADMAP PENGEMBANGAN (Development Plan)
+
+Proyek ini cukup kompleks. Untuk meminimalisir kegagalan, kerjakan dengan sistem bertahap (agile):
+
+**Fase 1: CLI MVP (Core Text & Cut) - [Estimasi: 2 Minggu]**
+
+* *Goal:* Bisa bikin klip vertikal biasa dari link YouTube (tanpa deteksi wajah dulu).
+* Bikin script Python untuk `yt-dlp` download subtitle.
+* Setup prompt LLM untuk ekstraksi JSON berisi *timestamp*.
+* Automasi pemotongan pakai `ffmpeg` dengan crop statis (tengah layar) + subtitle standar.
+* *Output Phase 1:* Sistem jalan dari URL sampai jadi video MP4 dari Terminal.
+
+**Fase 2: Visual AI (Face & Lip Tracking) - [Estimasi: 3 Minggu]**
+
+* *Goal:* Memasukkan kecerdasan kamera (Active Speaker).
+* Integrasikan YOLO untuk Face Tracking pada klip mentah 60 detik.
+* Integrasikan model Lip Movement (TalkNet) untuk mencocokkan audio dan mulut.
+* Tulis algoritma **Hysteresis (Jeda 2 Detik)** menggunakan Python untuk membuat *timeline array* siapa yang sedang disorot kamera.
+* Ubah script FFmpeg agar menerima koordinat crop yang berubah-ubah seiring waktu.
+
+**Fase 3: Backend, Queue & API - [Estimasi: 2 Minggu]**
+
+* *Goal:* Arsitektur server agar tidak *crash* kalau dipakai banyak orang.
+* Bungkus script Python Fase 1 & 2 ke dalam Celery Worker.
+* Buat FastAPI endpoint (`/api/generate-clips`).
+* Tambahkan fallback Whisper AI kalau video YT tidak punya subtitle.
+
+**Fase 4: Web UI & Polish - [Estimasi: 1-2 Minggu]**
+
+* *Goal:* Tampilan untuk User.
+* Buat Web frontend (Next.js/React).
+* Sistem notifikasi/progress bar (WebSocket/Polling) untuk memberi tahu user: "Sedang download subtitle..." $\rightarrow$ "AI sedang memilih klip..." $\rightarrow$ "Render video...".
+* Desain template subtitle agar mirip gaya *Alex Hormozi* atau *Ali Abdaal*.
+
+Dengan pipeline ini, aplikasi kamu akan jauh lebih efisien dari kompetitor amatir karena kamu tidak memproses Computer Vision di video panjang, melainkan hanya di klip pendek hasil kurasi LLM.
+
+
+
+
+Kabar baiknya, ada sedikit kesalahpahaman soal Whisper yang justru menguntungkanmu: **Whisper dari OpenAI itu sebenarnya 100% Open Source dan gratis dijalankan di server/komputermu sendiri.** Yang berbayar itu hanya kalau kamu pakai *API endpoint* milik mereka.
+
+Karena kamu mau menjalankan sistem ini di ekosistem **Docker** (yang pastinya sudah sangat familiar buatmu untuk *setup* infrastruktur *self-hosted*), ini adalah konfigurasi idealnya tanpa perlu sistem *login* sama sekali.
+
+### 1. Solusi Speech-to-Text (STT) Bahasa Indonesia + Timestamp
+
+Jangan pakai model Whisper versi *default* (karena agak lambat). Gunakan **`faster-whisper`** (implementasi Whisper menggunakan CTranslate2).
+
+* **Keunggulan:** Open source, jalan *offline* di dalam Docker, butuh RAM/VRAM lebih kecil, dan sangat akurat untuk **Bahasa Indonesia**.
+* **Fitur Waktu (Timestamp):** `faster-whisper` secara bawaan (*native*) memiliki fitur **Word-level Timestamps**. Dia bisa mengeluarkan output format `.srt` atau `.vtt` lengkap dengan waktu per kata (bukan cuma per kalimat), yang sangat krusial untuk fitur *Lip-sync* dan pemotongan klip presisi.
+
+### 2. Solusi LLM (Gemini) Tanpa Login User
+
+Kamu tidak perlu membuat sistem *login* (auth) untuk *user* di aplikasimu saat ini. Bikin saja aplikasinya *stateless* (langsung *input* URL -> proses -> *download*).
+
+Untuk API AI-nya, **GitHub Copilot tidak menyediakan public API** untuk pemrosesan teks umum seperti ini. Solusi paling pas adalah **Gemini API** (via Google AI Studio).
+
+* Gemini 1.5 Flash punya *free tier* yang sangat besar (15 RPM, jutaan token per hari).
+* Kamu cukup ambil satu **API Key Gemini**, lalu masukkan sebagai *Environment Variable* (`.env`) di Docker. Aplikasimu akan memanggil API ini di *backend* tanpa *user* perlu tahu atau *login*.
+
+### 3. Rancangan Arsitektur Docker (`docker-compose`)
+
+Mengingat alur kerjanya butuh *download*, AI *processing*, dan *rendering* FFmpeg, kamu tidak bisa menggabungkan semuanya di satu *container* web karena akan *timeout*. Kamu butuh arsitektur **Web + Worker + Redis**.
+
+Berikut adalah rancangan `docker-compose.yml` untuk project ini:
+
+```yaml
+version: '3.8'
+
+services:
+  # 1. API Server (FastAPI / Node.js)
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+
+  # 2. Redis (Message Broker / Antrean)
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  # 3. Worker Node (Python + FFmpeg + ML Models)
+  worker:
+    build: ./worker
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      - ./shared_storage:/app/storage # Folder sharing antar container
+    # deploy: 
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+```
+
+### 4. Isi Dockerfile untuk Worker Node (Crucial Part)
+
+Di dalam `worker` inilah semua "kerja kotor" (CLI Arch Linux style) dilakukan. *Dockerfile*-nya harus menginstal FFmpeg, yt-dlp, dan dependensi Python untuk Machine Learning.
+
+*Gambaran kasar `worker/Dockerfile`:*
+
+```dockerfile
+FROM python:3.10-slim
+
+# Install system dependencies (ffmpeg wajib!)
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+# (Celery, yt-dlp, faster-whisper, ultralytics untuk YOLO, google-generativeai)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Jalankan Celery worker
+CMD ["celery", "-A", "tasks", "worker", "--loglevel=info"]
+
+```
+
+### 5. Alur Kerja (Workflow) di dalam Docker
+
+1. User buka UI di *browser* (localhost:8000), masukkan link YT, tekan Submit.
+2. Container **`api`** menerima *request*, membuat Task ID, lalu mengirim pesan ke **`redis`**: *"Tolong proses video URL ini"*. `api` langsung membalas ke *browser*: "Video sedang diproses".
+3. Container **`worker`** mengambil tugas dari `redis` dan mulai bekerja secara *background*:
+* Memanggil `yt-dlp` via *subprocess*.
+* Menjalankan `faster-whisper` (STT Bahasa Indonesia).
+* Memanggil *Gemini API* untuk kurasi teks (API key dibaca dari `.env`).
+* Menjalankan *YOLO* untuk deteksi wajah (Active Speaker).
+* Mengeksekusi *FFmpeg* untuk finalisasi MP4.
+
+
+4. Hasil MP4 disimpan di volume `./shared_storage`. `worker` meng-update status di `redis` menjadi "SELESAI".
+5. User di UI mendapatkan link *download* MP4-nya.
+
+Sistem *asynchronous* dengan Docker dan Redis seperti ini memastikan *server* tidak nge-*hang* saat merender video, dan kamu bisa bebas mengutak-atik model YOLO atau Whisper di *container worker* tanpa merusak API utama.

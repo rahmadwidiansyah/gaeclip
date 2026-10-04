@@ -1,0 +1,74 @@
+# --- Secrets & local env (JANGAN PERNAH di-commit) ---
+.env
+.env.*.local
+*.key
+*.pem
+*.pfx
+*.p12
+.tauri/
+cookies.txt
+*cookies*.txt
+latest.json
+
+# --- Python ---
+.venv/
+.venv-rocm/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+.turbo/
+
+# --- Rust / Tauri (target bisa GB-an) ---
+src-tauri/target/
+src-tauri/gen/
+
+# --- Build outputs (dibuat ulang oleh CI) ---
+dist/
+build/
+bin/
+binaries/
+*.exe
+
+# --- Storage & runtime (sqlite, jobs, clips, transcripts) ---
+storage/*
+!storage/.gitkeep
+
+# --- Media & artifacts ---
+*.mp4
+*.m4a
+*.wav
+*.srt
+*.vtt
+*.log
+report.*.json
+
+# --- Models ---
+# Isi folder di-ignore default; file model yang dibutuhkan di-force-add
+# (masuk Git LFS via .gitattributes):
+#   models/blaze_face_short_range.tflite
+#   models/yolo26n-face.pt
+#   models/TalkNet-ASD/pretrain_TalkSet.model
+# Clone referensi bersarang (ada .git sendiri) jangan di-commit:
+#   models/TalkNet-ASD/ (kecuali file .model di atas)
+#   models/syncnet_python/
+/models/*
+
+# --- Reference clone pihak ketiga ---
+yt-dlp-reference/
+
+# --- OS ---
+.DS_Store
+Thumbs.db

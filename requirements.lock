@@ -1,0 +1,5 @@
+# Release A runtime lock for the current Python 3.14 local profile.
+# Regenerate with the project's package manager when dependencies change.
+pydantic==2.13.4
+pydantic-core==2.46.4
+typing-extensions==4.15.0

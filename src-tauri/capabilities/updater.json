@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "updater",
+  "description": "Permissions for the Tauri v2 updater plugin (verified auto-updates)",
+  "windows": ["main"],
+  "permissions": ["updater:default"]
+}
