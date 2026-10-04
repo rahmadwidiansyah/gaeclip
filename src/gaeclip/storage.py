@@ -12,6 +12,21 @@ def new_job_id() -> str:
     return f"job_{secrets.token_urlsafe(12)}"
 
 
+def app_base_dir() -> Path:
+    """Install dir when frozen, else the process working directory.
+
+    The PyInstaller sidecar runs with an unpredictable CWD, so
+    CWD-relative lookups (``models/...``) silently miss the bundled
+    assets on desktop. The frozen exe always sits beside them, so use
+    its directory there; everywhere else preserve legacy CWD behavior.
+    """
+    import sys
+
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd()
+
+
 class JobStorage:
     def __init__(self, root: Path, job_id: str):
         if "/" in job_id or "\\" in job_id or job_id.startswith("."):

@@ -142,6 +142,23 @@ class ModelLifecycleTests(unittest.TestCase):
     def test_bundled_weights_found(self):
         self.assertIsNotNone(self.model_path())
 
+    def test_frozen_base_dir_used_first(self):
+        import sys
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from gaeclip.talknet.model import resolve_model_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            asset = Path(tmp) / "models" / "pretrain_TalkSet.model"
+            asset.parent.mkdir(parents=True)
+            asset.write_bytes(b"fake-weights")
+            exe = str(Path(tmp) / "gaeclip-api.exe")
+            with patch.object(sys, "frozen", True, create=True), \
+                    patch.object(sys, "executable", exe):
+                self.assertEqual(resolve_model_path(""), asset)
+
     def test_ai_lazy_singleton_reuse(self):
         from gaeclip.talknet import model as model_mod
 

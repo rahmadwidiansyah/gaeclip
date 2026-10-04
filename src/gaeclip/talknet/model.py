@@ -43,7 +43,16 @@ def resolve_model_path(configured: str = "") -> Path | None:
     if configured.strip():
         candidate = Path(configured.strip()).expanduser()
         return candidate if candidate.is_file() else None
-    for base in (Path.cwd(), Path(__file__).resolve().parents[3]):
+    bases = [Path.cwd(), Path(__file__).resolve().parents[3]]
+    try:
+        from ..storage import app_base_dir
+
+        bundled_base = app_base_dir()
+        if bundled_base not in bases:
+            bases.insert(0, bundled_base)
+    except Exception:
+        pass
+    for base in bases:
         candidate = base / DEFAULT_MODEL_RELATIVE
         if candidate.is_file():
             return candidate

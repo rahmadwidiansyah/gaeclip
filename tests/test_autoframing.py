@@ -526,5 +526,35 @@ class RenderExecutionTests(unittest.TestCase):
             self.assertGreater(out.stat().st_size, 10_000)
 
 
+class ModelResolutionTests(unittest.TestCase):
+    def test_frozen_base_dir_used_first(self):
+        import sys
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from gaeclip.autoframing import resolve_blaze_model
+
+        with tempfile.TemporaryDirectory() as tmp:
+            asset = Path(tmp) / "models" / "blaze_face_short_range.tflite"
+            asset.parent.mkdir(parents=True)
+            asset.write_bytes(b"fake-tflite")
+            exe = str(Path(tmp) / "gaeclip-api.exe")
+            with patch.object(sys, "frozen", True, create=True), \
+                    patch.object(sys, "executable", exe):
+                self.assertEqual(resolve_blaze_model(), str(asset))
+
+    def test_explicit_path_wins(self):
+        import tempfile
+        from pathlib import Path
+
+        from gaeclip.autoframing import resolve_blaze_model
+
+        with tempfile.TemporaryDirectory() as tmp:
+            asset = Path(tmp) / "custom.tflite"
+            asset.write_bytes(b"x")
+            self.assertEqual(resolve_blaze_model(str(asset)), str(asset))
+
+
 if __name__ == "__main__":
     unittest.main()

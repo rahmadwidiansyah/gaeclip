@@ -69,7 +69,10 @@ def resolve_blaze_model(explicit: str | None = None) -> str:
     """Find the BlazeFace .tflite without hardcoding one location."""
     from pathlib import Path
 
-    candidates = ([explicit] if explicit else []) + list(BLAZE_MODEL_CANDIDATES)
+    from .storage import app_base_dir
+
+    bundled = app_base_dir() / "models" / "blaze_face_short_range.tflite"
+    candidates = ([explicit] if explicit else []) + [str(bundled)] + list(BLAZE_MODEL_CANDIDATES)
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return str(candidate)
