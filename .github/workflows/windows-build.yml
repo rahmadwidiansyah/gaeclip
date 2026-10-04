@@ -10,6 +10,7 @@ on:
       - "src-tauri/**"
       - "frontend/**"
       - "desktop/**"
+      - "tests/**"
       - ".github/workflows/windows-build.yml"
   workflow_dispatch:
 
