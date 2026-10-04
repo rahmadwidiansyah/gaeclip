@@ -60,6 +60,12 @@ jobs:
           # by sidecar("gaeclip-api")) — plain gaeclip-api.exe is not found.
           Copy-Item dist/gaeclip-api/gaeclip-api.exe `
             src-tauri/binaries/gaeclip-api-x86_64-pc-windows-msvc.exe
+          # PyInstaller onedir keeps all DLLs/python in _internal/ next to
+          # the exe — externalBin only bundles the exe, so stage _internal
+          # for bundle.resources (lands beside the installed sidecar exe,
+          # where the bootloader looks for python DLLs).
+          Copy-Item -Recurse dist/gaeclip-api/_internal `
+            src-tauri/binaries/_internal
 
       - name: Fetch third-party binaries
         run: |

@@ -34,7 +34,8 @@
       "../bin/node.exe": "bin/node.exe",
       "../models/blaze_face_short_range.tflite": "models/blaze_face_short_range.tflite",
       "../models/yolo26n-face.pt": "models/yolo26n-face.pt",
-      "../models/pretrain_TalkSet.model": "models/pretrain_TalkSet.model"
+      "../models/pretrain_TalkSet.model": "models/pretrain_TalkSet.model",
+      "binaries/_internal": "_internal/"
     },
     "externalBin": ["binaries/gaeclip-api"]
   },

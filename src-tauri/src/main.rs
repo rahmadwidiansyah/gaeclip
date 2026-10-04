@@ -193,11 +193,15 @@ fn main() {
                     frontend_dir.is_dir()
                 ),
             );
+            // Pass server.js by RELATIVE name with current_dir set: absolute
+            // Windows paths with the verbatim \\?\ prefix break Node's
+            // module resolution (EISDIR lstat 'C:'), while the exe path
+            // itself launches fine.
             let (mut rx_web, _child_web) = app
                 .shell()
                 .command(node.to_string_lossy().as_ref())
-                .args([server_js.to_string_lossy().as_ref(), "-p", "3000"])
-                .current_dir(frontend_dir)
+                .args(["server.js", "-p", "3000"])
+                .current_dir(&frontend_dir)
                 .envs(env)
                 .spawn()
                 .map_err(|e| {
