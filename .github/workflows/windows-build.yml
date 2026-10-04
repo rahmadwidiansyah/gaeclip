@@ -54,12 +54,12 @@ jobs:
           pyinstaller --noconfirm --onedir --name gaeclip-api `
             --collect-all gaeclip `
             -p src src/gaeclip/desktop.py
-          New-Item -ItemType Directory -Force -Path binaries | Out-Null
-          # Tauri externalBin resolves binaries/<name>-<target-triple>.exe
-          # at build AND runtime (sidecar("gaeclip-api")), so the file must
-          # carry the triple suffix — plain gaeclip-api.exe is not found.
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
+          # Tauri externalBin paths resolve under src-tauri/, and the file
+          # must carry the target-triple suffix (used at build AND runtime
+          # by sidecar("gaeclip-api")) — plain gaeclip-api.exe is not found.
           Copy-Item dist/gaeclip-api/gaeclip-api.exe `
-            binaries/gaeclip-api-x86_64-pc-windows-msvc.exe
+            src-tauri/binaries/gaeclip-api-x86_64-pc-windows-msvc.exe
 
       - name: Fetch third-party binaries
         run: |
