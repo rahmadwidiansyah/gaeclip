@@ -157,7 +157,8 @@ class ModelLifecycleTests(unittest.TestCase):
             exe = str(Path(tmp) / "gaeclip-api.exe")
             with patch.object(sys, "frozen", True, create=True), \
                     patch.object(sys, "executable", exe):
-                self.assertEqual(resolve_model_path(""), asset)
+                # resolve(): Windows expands 8.3 short names (RUNNER~1).
+                self.assertEqual(resolve_model_path(""), asset.resolve())
 
     def test_ai_lazy_singleton_reuse(self):
         from gaeclip.talknet import model as model_mod

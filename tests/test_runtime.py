@@ -405,8 +405,10 @@ class DesktopToolsTests(unittest.TestCase):
                     patch.object(sys, "executable", exe), \
                     patch.dict(os.environ, {"PATH": "KEEP"}):
                 got = desktop_mod._ensure_bundled_tools_on_path()
-                self.assertEqual(got, str(bindir))
-                self.assertTrue(os.environ["PATH"].startswith(str(bindir) + os.pathsep))
+                # resolve(): Windows expands 8.3 short names (RUNNER~1).
+                want = str(bindir.resolve())
+                self.assertEqual(got, want)
+                self.assertTrue(os.environ["PATH"].startswith(want + os.pathsep))
                 self.assertTrue(os.environ["PATH"].endswith("KEEP"))
 
     def test_noop_when_not_frozen(self):

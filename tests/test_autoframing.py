@@ -542,7 +542,8 @@ class ModelResolutionTests(unittest.TestCase):
             exe = str(Path(tmp) / "gaeclip-api.exe")
             with patch.object(sys, "frozen", True, create=True), \
                     patch.object(sys, "executable", exe):
-                self.assertEqual(resolve_blaze_model(), str(asset))
+                # resolve(): Windows expands 8.3 short names (RUNNER~1).
+                self.assertEqual(resolve_blaze_model(), str(asset.resolve()))
 
     def test_explicit_path_wins(self):
         import tempfile
