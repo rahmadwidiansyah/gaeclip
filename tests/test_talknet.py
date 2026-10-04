@@ -5,6 +5,7 @@ everything else is stubbed/deterministic. GPU-dependent behavior is
 asserted as graceful degradation (no CUDA/MPS on this box).
 """
 
+import shutil
 import sys
 import unittest
 
@@ -547,33 +548,38 @@ class IntegrationTests(unittest.TestCase):
 
         self.assertTrue(overlapping_speech({"a": 0.80, "b": 0.77, "d": 0.81})[0])
 
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg required")
     def test_real_model_single_window_mechanics(self):
         # REAL weights, synthetic video: proves crop->MFCC->batch->score
         # plumbing (not accuracy) on this CPU box.
+        import os
         import subprocess
+        import tempfile
 
         from gaeclip.talknet.detector import TalkNetDetector
 
-        subprocess.run(
-            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
-             "-i", "testsrc2=size=320x240:rate=30:duration=2",
-             "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-             "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac",
-             "-shortest", "/tmp/talknet_mech.mp4"],
-            check=True, timeout=120)
-        import numpy as np
+        with tempfile.TemporaryDirectory() as tmp:
+            mech = os.path.join(tmp, "talknet_mech.mp4")
+            subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                 "-i", "testsrc2=size=320x240:rate=30:duration=2",
+                 "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+                 "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac",
+                 "-shortest", mech],
+                check=True, timeout=120)
+            import numpy as np
 
-        sr = 16000
-        t = np.arange(2 * sr, dtype=np.float64) / sr
-        audio = (0.5 * np.sin(2 * np.pi * 220 * t) * 32767).astype(np.int16)
-        tracks = [FakeTrack("a", boxes=[(s / 10, (0.2, 0.2, 0.4, 0.6))
-                                        for s in range(20)]),
-                  FakeTrack("b", boxes=[(s / 10, (0.5, 0.2, 0.7, 0.6))
-                                        for s in range(20)])]
-        detector = TalkNetDetector(_cfg(device="cpu", max_batch_size=4))
-        result = detector.score_faces("/tmp/talknet_mech.mp4", tracks,
-                                      0.25, 0.75, audio, 16000, 320, 240,
-                                      reason="test")
+            sr = 16000
+            t = np.arange(2 * sr, dtype=np.float64) / sr
+            audio = (0.5 * np.sin(2 * np.pi * 220 * t) * 32767).astype(np.int16)
+            tracks = [FakeTrack("a", boxes=[(s / 10, (0.2, 0.2, 0.4, 0.6))
+                                            for s in range(20)]),
+                      FakeTrack("b", boxes=[(s / 10, (0.5, 0.2, 0.7, 0.6))
+                                            for s in range(20)])]
+            detector = TalkNetDetector(_cfg(device="cpu", max_batch_size=4))
+            result = detector.score_faces(mech, tracks,
+                                          0.25, 0.75, audio, 16000, 320, 240,
+                                          reason="test")
         self.assertEqual(detector.status, "READY")
         self.assertEqual(result.faces_requested, 2)
         self.assertEqual(len(result.scores), 2)

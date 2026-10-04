@@ -179,6 +179,25 @@ class SQLiteClient:
             self._conn.execute("SELECT 1")
         return True
 
+    def close(self) -> None:
+        """Release the SQLite connection (idempotent).
+
+        Required on Windows, where an open handle blocks file deletion
+        (temp-dir cleanup, reinstall, storage rotation). Linux tolerates
+        unlinking open files, so leaking this was invisible there.
+        Use-after-close raises sqlite3.ProgrammingError, like a raw
+        closed connection.
+        """
+        with self._lock:
+            try:
+                self._conn.commit()
+            except Exception:
+                pass
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+
     def scan_iter(self, match: str = "*", count: int = 100) -> list[str]:
         with self._lock:
             now = time.time()

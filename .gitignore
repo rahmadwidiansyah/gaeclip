@@ -60,9 +60,9 @@ report.*.json
 # (masuk Git LFS via .gitattributes):
 #   models/blaze_face_short_range.tflite
 #   models/yolo26n-face.pt
-#   models/TalkNet-ASD/pretrain_TalkSet.model
+#   models/pretrain_TalkSet.model
 # Clone referensi bersarang (ada .git sendiri) jangan di-commit:
-#   models/TalkNet-ASD/ (kecuali file .model di atas)
+#   models/TalkNet-ASD/
 #   models/syncnet_python/
 /models/*
 

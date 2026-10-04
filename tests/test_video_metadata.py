@@ -317,11 +317,17 @@ class SearchApiTests(unittest.TestCase):
         task_mock.delay.assert_called_once_with("job_3")
 
     def test_create_attaches_video_id(self):
-        res = self.client.post(
-            "/api/v1/jobs",
-            json={"source_url": "https://youtu.be/ZZZ9x"},
-            headers={"Idempotency-Key": "vid-test-1"},
-        )
+        # Never touch a real broker: this box may have no Redis
+        # (e.g. Windows CI). Same mock pattern as test_recreate.py.
+        with patch("gaeclip.worker.celery_task") as celery_task:
+            fake_task = MagicMock()
+            fake_task.delay.return_value = MagicMock(id="celery-vid-1")
+            celery_task.return_value = (MagicMock(), fake_task)
+            res = self.client.post(
+                "/api/v1/jobs",
+                json={"source_url": "https://youtu.be/ZZZ9x"},
+                headers={"Idempotency-Key": "vid-test-1"},
+            )
         self.assertEqual(res.status_code, 202, res.text)
         self.assertEqual(res.json()["video_id"], "ZZZ9x")
 

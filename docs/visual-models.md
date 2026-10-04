@@ -96,7 +96,8 @@ Measured synthetic-frame CPU baselines at 1280x720:
 
 TalkNet TalkSet checkpoint and SyncNet assets are also present locally:
 
-- `models/TalkNet-ASD/pretrain_TalkSet.model`
+- `models/pretrain_TalkSet.model` (moved from `models/TalkNet-ASD/` so it can be
+  tracked in git; the `TalkNet-ASD/` source clone stays a local reference)
 - `models/syncnet_python/data/syncnet_v2.model`
 - `models/syncnet_python/detectors/s3fd/weights/sfd_face.pth`
 

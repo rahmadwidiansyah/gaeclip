@@ -65,7 +65,7 @@ class TalkNetConfig:
     enabled: bool = True
     device: str = "auto"  # auto|cpu|cuda|mps
     resource_mode: str = "auto"  # auto|low|balanced|performance
-    model_path: str = ""  # empty = models/TalkNet-ASD/pretrain_TalkSet.model
+    model_path: str = ""  # empty = models/pretrain_TalkSet.model
     window_ms: int = 500  # 300-1000
     face_padding: float = 0.25
     face_size: int = 112

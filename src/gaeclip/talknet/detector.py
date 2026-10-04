@@ -64,7 +64,7 @@ class TalkNetDetector:
         if path is None:
             self.status, self.status_detail = (
                 "MODEL_MISSING",
-                "set TALKNET_MODEL_PATH or place models/TalkNet-ASD/pretrain_TalkSet.model")
+                "set TALKNET_MODEL_PATH or place models/pretrain_TalkSet.model")
             logger.info("[TALKNET_FALLBACK] reason=model_missing")
             return False
         info = resolve_device(self.config.device)

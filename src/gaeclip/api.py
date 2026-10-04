@@ -113,13 +113,29 @@ def create_app():
     runtime_mode = current_runtime()
     client = make_client()
     runner = make_runner()
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _lifespan(app):
+        yield
+        close = getattr(client, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                logger.warning("store client close failed", exc_info=True)
+
     app_settings = AppSettings(client)
     app_settings.migrate_from_env()
     settings = Settings.resolve(client)
     settings.ensure_storage()
     apply_log_level(app_settings.get("LOG_LEVEL"))
     repository = JobRepository(client)
-    app = FastAPI(title="Gaeclip API", version="1")
+    app = FastAPI(title="Gaeclip API", version="1", lifespan=_lifespan)
+    # Exposed for graceful shutdown/tests that must release the store
+    # (Windows cannot delete an open SQLite file).
+    app.state.store_client = client
     from fastapi.middleware.cors import CORSMiddleware
     allowed_origins = [
         origin.strip()

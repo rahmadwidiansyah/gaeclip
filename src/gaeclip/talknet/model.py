@@ -17,7 +17,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL_RELATIVE = "models/TalkNet-ASD/pretrain_TalkSet.model"
+DEFAULT_MODEL_RELATIVE = "models/pretrain_TalkSet.model"
 
 _REGISTRY: dict[tuple[str, str], "TalkNetInferenceModel"] = {}
 _REGISTRY_LOCK = threading.Lock()

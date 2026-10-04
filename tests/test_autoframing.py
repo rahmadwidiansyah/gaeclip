@@ -1,4 +1,5 @@
 import math
+import shutil
 import unittest
 from unittest.mock import patch
 
@@ -438,7 +439,10 @@ class RenderFilterTests(unittest.TestCase):
         self.assertIn("128k", args[args.index("-b:a") + 1])
 
 
+@unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg required")
 class RenderExecutionTests(unittest.TestCase):
+    """Real ffmpeg renders. Skipped where ffmpeg is unavailable
+    (e.g. Windows CI before the third-party binaries step)."""
     @staticmethod
     def make_source(path, size="1280x720", duration=3):
         import subprocess

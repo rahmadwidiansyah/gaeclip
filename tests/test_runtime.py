@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,6 +24,30 @@ def make_sqlite():
 
     directory = tempfile.mkdtemp()
     return SQLiteClient(Path(directory) / "gaeclip.db")
+
+
+@contextmanager
+def _closing_app(test_client):
+    """Yield a TestClient, releasing its store connection on exit.
+
+    The app owns one store client for its whole lifetime; on Windows an
+    open SQLite handle blocks temp-dir cleanup (WinError 32), so the
+    handle must be closed before TemporaryDirectory.__exit__ runs.
+    """
+    try:
+        yield test_client
+    finally:
+        try:
+            state = getattr(getattr(test_client, "app", None), "state", None)
+            store = getattr(state, "store_client", None)
+            close = getattr(store, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            pass
+        import gc
+
+        gc.collect()
 
 
 class ModeTests(unittest.TestCase):
@@ -298,8 +323,8 @@ class DesktopApiTests(unittest.TestCase):
 
         LocalJobRunner._reset_for_tests()
         with tempfile.TemporaryDirectory() as directory, \
-                patch.dict(os.environ, self._desktop_env(directory), clear=True):
-            client = self._make_app(directory)
+                patch.dict(os.environ, self._desktop_env(directory), clear=True), \
+                _closing_app(self._make_app(directory)) as client:
             self.assertEqual(client.get("/health/config").json()["runtime"], "desktop")
 
             created: dict = {}
@@ -341,8 +366,8 @@ class DesktopApiTests(unittest.TestCase):
 
         LocalJobRunner._reset_for_tests()
         with tempfile.TemporaryDirectory() as directory, \
-                patch.dict(os.environ, self._desktop_env(directory), clear=True):
-            client = self._make_app(directory)
+                patch.dict(os.environ, self._desktop_env(directory), clear=True), \
+                _closing_app(self._make_app(directory)) as client:
             with patch.object(LocalJobRunner, "submit", return_value="local-test-2"):
                 res = client.post(
                     "/api/v1/jobs",

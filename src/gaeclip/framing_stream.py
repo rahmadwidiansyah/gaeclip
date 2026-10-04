@@ -125,13 +125,64 @@ def iter_analysis_frames(video_path: str, fps: float = 6.0,
 
 
 def rss_mb() -> float:
-    """Process peak RSS in MiB (Linux ru_maxrss). -1 when unavailable."""
+    """Process peak RSS in MiB. -1 when unavailable.
+
+    Cross-platform: ``resource`` on Unix, ``psutil`` when installed,
+    Win32 ``GetProcessMemoryInfo`` fallback (the stdlib ``resource``
+    module does not exist on Windows, where this previously always
+    returned -1 and silently disabled the memory guard).
+    """
     try:
         import resource
 
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
     except Exception:
-        return -1.0
+        pass
+    try:
+        import os
+
+        import psutil
+
+        return psutil.Process(os.getpid()).memory_info().rss / 1048576.0
+    except Exception:
+        pass
+    try:
+        import ctypes
+        import sys
+
+        if sys.platform == "win32":
+            return _win32_peak_rss_mb(ctypes)
+    except Exception:
+        pass
+    return -1.0
+
+
+def _win32_peak_rss_mb(ctypes) -> float:
+    """Peak working set via psapi (no third-party deps)."""
+    from ctypes import wintypes
+
+    class _Counters(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    get_process = ctypes.windll.kernel32.GetCurrentProcess
+    get_process.restype = wintypes.HANDLE
+    get_mem_info = ctypes.windll.psapi.GetProcessMemoryInfo
+    counters = _Counters()
+    counters.cb = ctypes.sizeof(_Counters)
+    if not get_mem_info(get_process(), ctypes.byref(counters), counters.cb):
+        raise OSError("GetProcessMemoryInfo failed")
+    return counters.PeakWorkingSetSize / 1048576.0
 
 
 class AdaptiveSampler:

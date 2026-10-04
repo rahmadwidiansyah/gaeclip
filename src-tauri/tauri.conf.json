@@ -34,7 +34,7 @@
       "../bin/node.exe": "bin/",
       "../models/blaze_face_short_range.tflite": "models/",
       "../models/yolo26n-face.pt": "models/",
-      "../models/TalkNet-ASD/pretrain_TalkSet.model": "models/TalkNet-ASD/"
+      "../models/pretrain_TalkSet.model": "models/"
     },
     "externalBin": ["binaries/gaeclip-api"]
   },
