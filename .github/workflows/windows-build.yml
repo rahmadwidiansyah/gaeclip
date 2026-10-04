@@ -96,11 +96,21 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/denoland/deno/releases/download/v2.5.4/deno-x86_64-pc-windows-msvc.zip" -OutFile $deno
           Expand-Archive $deno -DestinationPath bin/
           Copy-Item (Join-Path (Split-Path (Get-Command node).Source) "node.exe") bin/
-          # yt-dlp ships as a pip console script (pyproject dependency);
-          # the frozen bundle has no Scripts/ dir, so stage it with the
-          # other tools — the backend resolves everything via PATH.
-          Copy-Item (Get-Command yt-dlp).Source bin/
-          Copy-Item (Join-Path (Split-Path (Get-Command node).Source) "node.exe") bin/
+          # yt-dlp: use the OFFICIAL standalone exe (PyInstaller bundle,
+          # ~30MB, embeds Python). The pip console script is only a ~100KB
+          # launcher stub pointing at the runner's Python + Scripts dir, so
+          # it dies silently (exit 1, no output) on user machines.
+          # latest = feature here: yt-dlp must track YouTube changes.
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile bin/yt-dlp.exe
+
+      - name: Smoke test staged tools (fail fast on stub/broken exes)
+        run: |
+          $ErrorActionPreference = "Stop"
+          bin/yt-dlp.exe --version
+          bin/ffmpeg.exe -version | Select-Object -First 1
+          bin/ffprobe.exe -version | Select-Object -First 1
+          bin/deno.exe --version
+          bin/node.exe --version
 
       - name: Build frontend + Tauri installer
         run: |
