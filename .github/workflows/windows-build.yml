@@ -74,9 +74,15 @@ jobs:
           Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $ffmpeg
           Expand-Archive $ffmpeg -DestinationPath "$env:RUNNER_TEMP/ff"
           Copy-Item "$env:RUNNER_TEMP/ff/*/bin/ffmpeg.exe" bin/
+          Copy-Item "$env:RUNNER_TEMP/ff/*/bin/ffprobe.exe" bin/
           $deno = "$env:RUNNER_TEMP/deno.zip"
           Invoke-WebRequest -Uri "https://github.com/denoland/deno/releases/download/v2.5.4/deno-x86_64-pc-windows-msvc.zip" -OutFile $deno
           Expand-Archive $deno -DestinationPath bin/
+          Copy-Item (Join-Path (Split-Path (Get-Command node).Source) "node.exe") bin/
+          # yt-dlp ships as a pip console script (pyproject dependency);
+          # the frozen bundle has no Scripts/ dir, so stage it with the
+          # other tools — the backend resolves everything via PATH.
+          Copy-Item (Get-Command yt-dlp).Source bin/
           Copy-Item (Join-Path (Split-Path (Get-Command node).Source) "node.exe") bin/
 
       - name: Build frontend + Tauri installer

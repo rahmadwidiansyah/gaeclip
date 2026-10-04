@@ -12,8 +12,35 @@ import os
 import sys
 
 
+def _ensure_bundled_tools_on_path() -> str | None:
+    """Prepend the bundled ``bin/`` dir to PATH when frozen.
+
+    The PyInstaller bundle has no redistributable Scripts/ dir, so bare
+    tool names (``yt-dlp``, ``ffmpeg``, ``ffprobe``, ``deno``) would all
+    fail with FileNotFoundError. Every call site resolves tools via
+    PATH, so one prepend here fixes them all (dev/docker: no-op, tools
+    are already on PATH there).
+    Returns the prepended dir, or None when not applicable.
+    """
+    import sys
+    from pathlib import Path
+
+    if not getattr(sys, "frozen", False):
+        return None
+    exe_dir = Path(sys.executable).resolve().parent
+    for candidate in (exe_dir / "bin", exe_dir):
+        if candidate.is_dir():
+            os.environ["PATH"] = str(candidate) + os.pathsep + os.environ.get("PATH", "")
+            print(f"Gaeclip Desktop tools dir: {candidate}", file=sys.stderr)
+            return str(candidate)
+    print("warning: no bundled tools dir found next to executable",
+          file=sys.stderr)
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("GAECLIP_RUNTIME", "desktop")
+    _ensure_bundled_tools_on_path()
     # Absolute imports: PyInstaller runs this file as a top-level script
     # (__main__), where relative imports fail. Works identically under
     # `python -m gaeclip.desktop`.

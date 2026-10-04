@@ -389,6 +389,38 @@ class DesktopApiTests(unittest.TestCase):
         LocalJobRunner._reset_for_tests()
 
 
+class DesktopToolsTests(unittest.TestCase):
+    """Bundled bin/ lands on PATH when frozen (PyInstaller sidecar)."""
+
+    def test_bundled_bin_prepended_when_frozen(self):
+        import sys
+
+        from gaeclip import desktop as desktop_mod
+
+        with tempfile.TemporaryDirectory() as directory:
+            bindir = Path(directory) / "bin"
+            bindir.mkdir()
+            exe = str(Path(directory) / "gaeclip-api.exe")
+            with patch.object(sys, "frozen", True, create=True), \
+                    patch.object(sys, "executable", exe), \
+                    patch.dict(os.environ, {"PATH": "KEEP"}):
+                got = desktop_mod._ensure_bundled_tools_on_path()
+                self.assertEqual(got, str(bindir))
+                self.assertTrue(os.environ["PATH"].startswith(str(bindir) + os.pathsep))
+                self.assertTrue(os.environ["PATH"].endswith("KEEP"))
+
+    def test_noop_when_not_frozen(self):
+        import sys
+
+        from gaeclip import desktop as desktop_mod
+
+        if getattr(sys, "frozen", False):
+            self.skipTest("only meaningful on a non-frozen interpreter")
+        with patch.dict(os.environ, {"PATH": "KEEP"}):
+            self.assertIsNone(desktop_mod._ensure_bundled_tools_on_path())
+            self.assertEqual(os.environ["PATH"], "KEEP")
+
+
 class SecretsCookiesTests(unittest.TestCase):
     def test_dpapi_passthrough_off_windows(self):
         import sys
