@@ -42,6 +42,33 @@ fn log_line(log: &Path, msg: &str) {
     eprintln!("{msg}");
 }
 
+fn log_dir(log: &Path, label: &str, dir: &Path) {
+    log_line(
+        log,
+        &format!("{label} = {} (exists={})", dir.display(), dir.is_dir()),
+    );
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            log_line(log, &format!("{label} list failed: {e}"));
+            return;
+        }
+    };
+    let mut count = 0;
+    for entry in entries.flatten() {
+        let kind = if entry.path().is_dir() { "dir" } else { "file" };
+        log_line(
+            log,
+            &format!("{label} .. {kind} {}", entry.file_name().to_string_lossy()),
+        );
+        count += 1;
+        if count >= 60 {
+            log_line(log, &format!("{label} .. (truncated at 60)"));
+            break;
+        }
+    }
+}
+
 fn sidecar_env(storage: &Path) -> HashMap<String, String> {
     let _ = std::fs::create_dir_all(storage);
     let mut env = HashMap::new();
@@ -144,6 +171,14 @@ fn main() {
                     log_line(&log, &format!("FATAL frontend resource missing: {e}"));
                     e
                 })?;
+            // Inventory the install tree: node.exe passes build-time
+            // validation but is missing at runtime (AV quarantine? bad
+            // extract?). One run answers whether bin/ is empty, partial,
+            // or absent entirely.
+            if let Some(res_root) = frontend_dir.parent() {
+                log_dir(&log, "install root", res_root);
+                log_dir(&log, "install root/bin", &res_root.join("bin"));
+            }
             log_line(&log, "spawning node frontend...");
             log_line(&log, &format!("node = {} (exists={})", node.display(), node.is_file()));
             log_line(
