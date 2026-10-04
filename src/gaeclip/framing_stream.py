@@ -158,7 +158,12 @@ def rss_mb() -> float:
 
 
 def _win32_peak_rss_mb(ctypes) -> float:
-    """Peak working set via psapi (no third-party deps)."""
+    """Peak working set via psapi (no third-party deps).
+
+    argtypes/restype are mandatory here: without them ctypes passes the
+    64-bit process HANDLE truncated to 32-bit int, GetProcessMemoryInfo
+    fails, and the caller falls back to -1.
+    """
     from ctypes import wintypes
 
     class _Counters(ctypes.Structure):
@@ -177,7 +182,11 @@ def _win32_peak_rss_mb(ctypes) -> float:
 
     get_process = ctypes.windll.kernel32.GetCurrentProcess
     get_process.restype = wintypes.HANDLE
+    get_process.argtypes = []
     get_mem_info = ctypes.windll.psapi.GetProcessMemoryInfo
+    get_mem_info.restype = wintypes.BOOL
+    get_mem_info.argtypes = [wintypes.HANDLE,
+                             ctypes.POINTER(_Counters), wintypes.DWORD]
     counters = _Counters()
     counters.cb = ctypes.sizeof(_Counters)
     if not get_mem_info(get_process(), ctypes.byref(counters), counters.cb):
