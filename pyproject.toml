@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gaeclip"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local YouTube auto-shorts generator"
 requires-python = ">=3.11,<3.15"
 dependencies = [
