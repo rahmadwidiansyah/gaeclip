@@ -32,7 +32,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <aside className="sidebar" aria-label="Navigasi utama">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
-            G
+            <img src="/icon.png" alt="" width={32} height={32} />
           </span>
           {!collapsed && (
             <span className="brand-text">

@@ -99,9 +99,9 @@ a { color: var(--md-primary); }
 .brand-mark {
   display: grid; place-items: center;
   width: 32px; height: 32px; flex: 0 0 32px;
-  border-radius: 10px; background: var(--md-primary); color: var(--md-on-primary);
-  font-weight: 700; font-size: 17px;
+  border-radius: 10px; overflow: hidden; background: transparent;
 }
+.brand-mark img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .brand-text { display: grid; line-height: 1.2; }
 .brand-text strong { font-size: 14px; }
 .brand-text small { color: var(--md-on-variant); font-size: 11px; }
