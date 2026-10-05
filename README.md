@@ -240,6 +240,4 @@ impractically slow and fragile), so ARM64 is deliberately not offered.
 
 ## License
 
-No `LICENSE` file is present in this repository yet. Until one is added, all
-rights are reserved by the repository owner — do not redistribute builds
-without permission. (Maintainers: add a LICENSE to resolve this.)
+MIT — see [LICENSE](LICENSE).
