@@ -1,0 +1,58 @@
+# Build context hygiene: keep images reproducible and free of host
+# secrets, caches, and local outputs. NOTE: models/*.tflite|*.pt|*.model
+# MUST stay in context (worker/Dockerfile COPYs them); do not add
+# blanket *.pt / *.model / models/ rules here.
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.venv-rocm/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+coverage/
+
+# Rust / Tauri (desktop bundle is built on Windows CI, not here)
+src-tauri/target/
+src-tauri/gen/
+
+# Secrets & local config (never bake into images)
+.env
+.env.*
+*.pem
+*.key
+cookies.txt
+*cookies*.txt
+
+# Local data & outputs (mounted as volumes at runtime instead)
+storage/
+data/
+uploads/
+downloads/
+outputs/
+*.mp4
+*.mkv
+*.webm
+*.log
+report.*.json
+
+# Reference/dev-only material
+yt-dlp-reference/
+benchmarks/
+problem/
+.cursor/

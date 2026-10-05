@@ -1,0 +1,139 @@
+name: docker-release
+
+# Quality gate + GHCR publish for the server edition.
+# - PR: tests + image builds (NOTHING is pushed).
+# - push main: tests, then build & push :latest + :sha-*.
+# - tag v*: tests, then build & push version tags (1.2.3, 1.2, 1) + latest.
+# Windows desktop ships separately via windows-desktop.yml (NSIS installer).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "api/**"
+      - "worker/**"
+      - "frontend/**"
+      - "pyproject.toml"
+      - "docker-compose*.yml"
+      - ".env.example"
+      - ".github/workflows/docker.yml"
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "src/**"
+      - "api/**"
+      - "worker/**"
+      - "frontend/**"
+      - "pyproject.toml"
+      - "docker-compose*.yml"
+      - ".env.example"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+# Single-flight per ref: a newer push cancels the superseded run.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  test:
+    name: quality-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python deps (API set, CPU torch)
+        run: |
+          python -m pip install -e ".[api,llm,transcription,framing,dev]"
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Backend tests
+        run: python -m pytest tests/ -q --ignore=tests/test_vision_benchmark.py
+
+      - name: Frontend tests
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+
+  publish:
+    name: build+push (${{ matrix.service }})
+    needs: [test]
+    # Tests failed -> this job never runs (needs), so broken code
+    # can never become an image.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - service: api
+            dockerfile: api/Dockerfile
+          - service: worker
+            dockerfile: worker/Dockerfile
+          - service: frontend
+            dockerfile: frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags + OCI labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/gaeclip-${{ matrix.service }}
+          # main -> latest; v1.2.3 -> 1.2.3, 1.2, 1 + latest; always a sha tag.
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build (push except on PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          # linux/amd64 ONLY. The ML stack has no trustworthy arm64 path:
+          # torch CPU index is x86_64-focused, mediapipe publishes no
+          # linux/aarch64 wheels, and QEMU-emulated arm64 builds of this
+          # stack are impractically slow and fragile. Documented, not faked.
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=gaeclip-${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=gaeclip-${{ matrix.service }}

@@ -1,10 +1,17 @@
 # --- Secrets & local env (JANGAN PERNAH di-commit) ---
 .env
-.env.*.local
+.env.*
+!.env.example
+!.env.template
 *.key
 *.pem
 *.pfx
 *.p12
+*.crt
+credentials/
+secrets/
+secret/
+*.secret
 .tauri/
 cookies.txt
 *cookies*.txt
@@ -13,21 +20,37 @@ latest.json
 # --- Python ---
 .venv/
 .venv-rocm/
+venv/
+env/
+ENV/
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pyre/
+.pytype/
+.pyright/
 .hypothesis/
 .coverage
+.coverage.*
 coverage.xml
+coverage/
 htmlcov/
 *.egg-info/
+.eggs/
+pip-wheel-metadata/
 
 # --- Node / Next.js ---
 node_modules/
 .next/
 out/
+coverage/
+.npm/
+.pnpm-store/
+.yarn/
 *.tsbuildinfo
 .turbo/
 
@@ -42,18 +65,35 @@ bin/
 binaries/
 *.exe
 
+# --- Docker Compose local overrides (never commit personal tweaks) ---
+docker-compose.override.yml
+docker-compose.local.yml
+
 # --- Storage & runtime (sqlite, jobs, clips, transcripts) ---
 storage/*
 !storage/.gitkeep
 
 # --- Media & artifacts ---
 *.mp4
+*.mkv
+*.webm
+*.mov
+*.avi
 *.m4a
 *.wav
+*.mp3
+*.aac
+*.flac
 *.srt
 *.vtt
+*.ass
 *.log
+*.log.*
 report.*.json
+*.report.json
+*.result.json
+*.debug.json
+*.benchmark.json
 
 # --- Models ---
 # Isi folder di-ignore default; file model yang dibutuhkan di-force-add
@@ -69,6 +109,38 @@ report.*.json
 # --- Reference clone pihak ketiga ---
 yt-dlp-reference/
 
+# --- Local databases / state (schema & migrations, if any, stay tracked) ---
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# --- AI-agent working artifacts (project skills/docs stay tracked) ---
+.cursor/
+.codex/
+.gemini/
+.aider/
+.ai-work/
+.agent-work/
+agent-reports/
+ai-reports/
+*.agent.md
+*.agent.json
+CLAUDE.local.md
+claude.local.md
+
+# --- IDE ---
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.history/
+
 # --- OS ---
 .DS_Store
 Thumbs.db
+Desktop.ini
