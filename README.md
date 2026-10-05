@@ -29,9 +29,10 @@ runner on desktop). See [docs/desktop-architecture.md](docs/desktop-architecture
 
 ### Windows
 
-1. Download the installer from the latest successful **`windows-desktop`** workflow run
-   (GitHub → Actions → `windows-desktop` → Artifacts → `gaeclip-setup`).
-   Versioned installers will appear under GitHub Releases once published.
+1. Download the installer from
+   [GitHub Releases](https://github.com/rahmadwidiansyah/gaeclip/releases)
+   (`Gaeclip_<version>_x64-setup.exe`; fresh builds also live under the
+   `windows-desktop` workflow Artifacts as `gaeclip-setup`).
 2. Install → open Gaeclip.
 3. Settings → paste your Gemini API key (get one at Google AI Studio).
 4. Optional: Settings → YouTube → paste login cookies if YouTube shows bot checks.
