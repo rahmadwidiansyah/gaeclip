@@ -1,10 +1,13 @@
+# Gaeclip dev compose: builds the MONO image (API + worker + frontend)
+# from source. For prebuilt GHCR images, use docker-compose.prod.yml.
 services:
-  api:
+  app:
     build:
       context: .
-      dockerfile: api/Dockerfile
+      dockerfile: Dockerfile
     ports:
       - "127.0.0.1:8000:8000"
+      - "127.0.0.1:3000:3000"
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
@@ -16,32 +19,13 @@ services:
       CLIP_BUFFER_SECONDS: ${CLIP_BUFFER_SECONDS:-1.5}
       API_HOST: 0.0.0.0
       API_PORT: 8000
+      FRONTEND_PORT: 3000
       FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://127.0.0.1:3000,http://localhost:3000}
       YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./storage:/app/storage
-    restart: unless-stopped
-
-  worker:
-    build:
-      context: .
-      dockerfile: worker/Dockerfile
-    environment:
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
-      GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-30}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      STORAGE_ROOT: ${STORAGE_ROOT:-/app/storage}
-      MIN_CLIP_DURATION_SECONDS: ${MIN_CLIP_DURATION_SECONDS:-30}
-      MAX_CLIP_DURATION_SECONDS: ${MAX_CLIP_DURATION_SECONDS:-60}
-      CLIP_BUFFER_SECONDS: ${CLIP_BUFFER_SECONDS:-1.5}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
       MAX_TRANSCRIPT_CHARS: ${MAX_TRANSCRIPT_CHARS:-1000000}
       MAX_LLM_INPUT_CHARS: ${MAX_LLM_INPUT_CHARS:-120000}
-      YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://127.0.0.1:8000}
     depends_on:
       redis:
         condition: service_healthy
@@ -61,19 +45,6 @@ services:
       retries: 10
     volumes:
       - redis-data:/data
-    restart: unless-stopped
-
-  frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    ports:
-      - "127.0.0.1:3000:3000"
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://127.0.0.1:8000}
-    depends_on:
-      api:
-        condition: service_started
     restart: unless-stopped
 
 volumes:

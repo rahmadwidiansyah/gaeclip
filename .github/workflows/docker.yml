@@ -10,10 +10,11 @@ on:
     branches: [main]
     paths:
       - "src/**"
-      - "api/**"
-      - "worker/**"
       - "frontend/**"
       - "pyproject.toml"
+      - "Dockerfile"
+      - "docker-entrypoint.sh"
+      - ".dockerignore"
       - "docker-compose*.yml"
       - ".env.example"
       - ".github/workflows/docker.yml"
@@ -21,10 +22,11 @@ on:
   pull_request:
     paths:
       - "src/**"
-      - "api/**"
-      - "worker/**"
       - "frontend/**"
       - "pyproject.toml"
+      - "Dockerfile"
+      - "docker-entrypoint.sh"
+      - ".dockerignore"
       - "docker-compose*.yml"
       - ".env.example"
       - ".github/workflows/docker.yml"
@@ -78,21 +80,11 @@ jobs:
           npm test
 
   publish:
-    name: build+push (${{ matrix.service }})
+    name: build+push (gaeclip mono)
     needs: [test]
     # Tests failed -> this job never runs (needs), so broken code
     # can never become an image.
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - service: api
-            dockerfile: api/Dockerfile
-          - service: worker
-            dockerfile: worker/Dockerfile
-          - service: frontend
-            dockerfile: frontend/Dockerfile
     steps:
       - uses: actions/checkout@v4
         with:
@@ -113,7 +105,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/gaeclip-${{ matrix.service }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/gaeclip
           # main -> latest; v1.2.3 -> 1.2.3, 1.2, 1 + latest; always a sha tag.
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
@@ -126,7 +118,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: ./Dockerfile
           # linux/amd64 ONLY. The ML stack has no trustworthy arm64 path:
           # torch CPU index is x86_64-focused, mediapipe publishes no
           # linux/aarch64 wheels, and QEMU-emulated arm64 builds of this
@@ -135,5 +127,5 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=gaeclip-${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=gaeclip-${{ matrix.service }}
+          cache-from: type=gha,scope=gaeclip-mono
+          cache-to: type=gha,mode=max,scope=gaeclip-mono

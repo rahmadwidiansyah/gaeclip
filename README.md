@@ -116,11 +116,13 @@ Cookies never leave your machine except toward YouTube itself.
 Images are published automatically to GHCR on every `main` push (after tests
 pass) and on version tags. Pull — don't build — for normal use.
 
+One **mono image** holds the whole server edition (FastAPI backend + Celery
+worker + Next.js UI supervised in one container); Redis runs as its companion
+service:
+
 | Image | Content |
 |---|---|
-| `ghcr.io/rahmadwidiansyah/gaeclip-api` | FastAPI backend |
-| `ghcr.io/rahmadwidiansyah/gaeclip-worker` | Celery worker (pipeline + ML) |
-| `ghcr.io/rahmadwidiansyah/gaeclip-frontend` | Next.js UI |
+| `ghcr.io/rahmadwidiansyah/gaeclip` | API + worker + frontend (mono) |
 
 Tags: `latest` (main branch), `1.2.3` / `1.2` / `1` (git tags `v*`), `sha-<commit>`.
 
@@ -136,8 +138,9 @@ docker compose -f docker-compose.prod.yml up -d
 Logs:
 
 ```bash
-docker compose -f docker-compose.prod.yml logs -f          # everything
-docker compose -f docker-compose.prod.yml logs -f worker   # one service
+docker compose -f docker-compose.prod.yml logs -f       # everything
+docker compose -f docker-compose.prod.yml logs -f app    # app service
+docker compose -f docker-compose.prod.yml logs -f redis # redis service
 ```
 
 Tear down (keeps data); add `-v` to also drop the Redis volume:
@@ -230,7 +233,7 @@ impractically slow and fragile), so ARM64 is deliberately not offered.
 
 ## Releases
 
-- Docker: `ghcr.io/rahmadwidiansyah/gaeclip-{api,worker,frontend}` —
+- Docker: `ghcr.io/rahmadwidiansyah/gaeclip` —
   `latest` tracks `main`; pin `GAECLIP_VERSION=1.2.3` for stable. Versioning: `vMAJOR.MINOR.PATCH`.
 - Windows: NSIS installer from the `windows-desktop` workflow artifacts;
   versioned binaries will be attached to GitHub Releases.
