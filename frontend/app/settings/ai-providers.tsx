@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Collapsible, Icon } from "../components/ui";
+import { Collapsible, ConfirmDialog, Icon, IconButton, Pagination, SearchInput } from "../components/ui";
 import {
   addProvider,
   deleteProvider,
@@ -16,6 +16,8 @@ import {
   testProviderModel,
 } from "../lib/api";
 import { accordionOpenId, cooldownText, healthBadge, moveId, timeAgo, QUOTA_NOTE } from "../lib/ai-providers";
+import { buildProviderEditPayload, isDuplicateModel, validateProviderName } from "../lib/provider-forms";
+import { DEFAULT_PAGE_SIZE, pageCount, paginate } from "../lib/pagination";
 import { selectableModels } from "../lib/ai-models";
 import type { GeminiProviderInfo, ProviderDiscoveryModel } from "../lib/types";
 
@@ -30,6 +32,12 @@ function HealthChip({ state, cooldownUntil }: { state?: string; cooldownUntil?: 
   );
 }
 
+function filterDiscovery(models: ProviderDiscoveryModel[], query: string): ProviderDiscoveryModel[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return models;
+  return models.filter((m) => `${m.id} ${m.display_name || ""}`.toLowerCase().includes(needle));
+}
+
 export default function AiProvidersSection({
   apiBase,
   push,
@@ -41,6 +49,10 @@ export default function AiProvidersSection({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [discovery, setDiscovery] = useState<Record<string, ProviderDiscoveryModel[]>>({});
+  const [discError, setDiscError] = useState<Record<string, string | null>>({});
+  const [discQuery, setDiscQuery] = useState<Record<string, string>>({});
+  const [discPage, setDiscPage] = useState<Record<string, number>>({});
+  const [discSize, setDiscSize] = useState<Record<string, number>>({});
   const [newName, setNewName] = useState("");
   const [newKey, setNewKey] = useState("");
   const [showAdd, setShowAdd] = useState(false);
@@ -49,6 +61,17 @@ export default function AiProvidersSection({
   // Accordion by stable provider id: SEMUA COLLAPSED by default, maksimal
   // satu expanded. UI state saja (tidak disimpan ke database).
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // Edit dialog state — identified by STABLE id; name is display-only and
+  // freely renameable. The key field starts BLANK: blank = keep old secret.
+  const [editTarget, setEditTarget] = useState<GeminiProviderInfo | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editKey, setEditKey] = useState("");
+  const [editEnabled, setEditEnabled] = useState(true);
+  const [editPriority, setEditPriority] = useState(1);
+
+  // Delete confirmation — never window.confirm(); uses shared Dialog.
+  const [deleteTarget, setDeleteTarget] = useState<GeminiProviderInfo | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -100,29 +123,90 @@ export default function AiProvidersSection({
       setShowAdd(false);
     }, "Provider ditambahkan. Jalankan Temukan Model untuk mengisi daftar model.");
 
+  const openEdit = (p: GeminiProviderInfo) => {
+    setEditTarget(p);
+    setEditName(p.name);
+    setEditKey("");
+    setEditEnabled(p.enabled);
+    setEditPriority(p.priority);
+  };
+
+  const editNameError = validateProviderName(editName);
+
+  const onSaveEdit = async () => {
+    if (!editTarget || editNameError) return;
+    const key = `edit-${editTarget.id}`;
+    setBusy(key);
+    try {
+      // Blank key field => payload omits api_key => secret preserved.
+      await editProvider(apiBase, editTarget.id, buildProviderEditPayload({
+        name: editName,
+        apiKey: editKey,
+        enabled: editEnabled,
+        priority: editPriority,
+      }));
+      await load();
+      setEditTarget(null);
+      push(`Provider "${editName.trim()}" disimpan`, "success");
+    } catch (e) {
+      push(e instanceof Error ? e.message : "Gagal menyimpan provider", "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onConfirmDelete = () =>
+    wrap(`del-${deleteTarget?.id ?? ""}`, async () => {
+      if (!deleteTarget) throw new Error("Provider tidak dipilih");
+      await deleteProvider(apiBase, deleteTarget.id);
+      // Direct state update: no manual page reload needed; wrap() reloads
+      // the authoritative list right after.
+      setProviders((prev) => (prev ? prev.filter((p) => p.id !== deleteTarget.id) : prev));
+      setOpenId((prev) => (prev === deleteTarget.id ? null : prev));
+      setDeleteTarget(null);
+    }, "Provider dihapus");
+
+  const resetDiscoveryPage = (id: string) => setDiscPage((s) => ({ ...s, [id]: 1 }));
+
   const onDiscover = (p: GeminiProviderInfo) =>
     wrap(`discover-${p.id}`, async () => {
-      const res = await getProviderModels(apiBase, p.id);
-      setDiscovery((d) => ({ ...d, [p.id]: res.models ?? [] }));
+      setDiscError((d) => ({ ...d, [p.id]: null }));
+      try {
+        const res = await getProviderModels(apiBase, p.id);
+        // Replace (never merge): stale results must not mix with fresh ones.
+        setDiscovery((d) => ({ ...d, [p.id]: res.models ?? [] }));
+        resetDiscoveryPage(p.id);
+      } catch (e) {
+        setDiscError((d) => ({ ...d, [p.id]: e instanceof Error ? e.message : "Discovery gagal" }));
+        throw e;
+      }
     });
 
   const onRefreshModels = (p: GeminiProviderInfo) =>
     wrap(`refresh-${p.id}`, async () => {
-      const res = await refreshProviderModels(apiBase, p.id);
-      const removed: string[] = res.removed_marked_unavailable ?? [];
-      push(
-        removed.length > 0
-          ? `Discovery: ${res.discovered ?? 0} model, ${removed.length} ditandai tidak tersedia`
-          : `Discovery: ${res.discovered ?? 0} model`,
-        "success"
-      );
-      await onDiscoverSilent(p.id);
+      setDiscError((d) => ({ ...d, [p.id]: null }));
+      try {
+        const res = await refreshProviderModels(apiBase, p.id);
+        const removed: string[] = res.removed_marked_unavailable ?? [];
+        push(
+          removed.length > 0
+            ? `Discovery: ${res.discovered ?? 0} model, ${removed.length} ditandai tidak tersedia`
+            : `Discovery: ${res.discovered ?? 0} model`,
+          "success"
+        );
+        await onDiscoverSilent(p.id);
+        resetDiscoveryPage(p.id);
+      } catch (e) {
+        setDiscError((d) => ({ ...d, [p.id]: e instanceof Error ? e.message : "Refresh discovery gagal" }));
+        throw e;
+      }
     });
 
   const onDiscoverSilent = async (id: string) => {
     try {
       const res = await getProviderModels(apiBase, id);
       setDiscovery((d) => ({ ...d, [id]: res.models ?? [] }));
+      setDiscError((d) => ({ ...d, [id]: null }));
     } catch {
       /* silent */
     }
@@ -198,6 +282,12 @@ export default function AiProvidersSection({
     void wrap(`models-${p.id}`, () => editProvider(apiBase, p.id, { models }), `Model ${id} ditambahkan`);
   };
 
+  const deleteTargetActive =
+    deleteTarget !== null &&
+    deleteTarget.enabled &&
+    deleteTarget.key_configured &&
+    deleteTarget.models.some((m) => m.enabled);
+
   return (
     <section className="card" aria-label="Provider Gemini">
       <div className="card-head row">
@@ -225,10 +315,19 @@ export default function AiProvidersSection({
       ) : (
         <div className="prov-list">
           {providers.map((p, pi) => {
-            const discovered = discovery[p.id] ?? [];
+            const allDiscovered = discovery[p.id] ?? [];
+            const query = discQuery[p.id] ?? "";
+            const filtered = filterDiscovery(allDiscovered, query);
+            const pageSize = discSize[p.id] ?? DEFAULT_PAGE_SIZE;
+            const totalPages = pageCount(filtered.length, pageSize);
+            const discPageSafe = Math.min(totalPages, Math.max(1, discPage[p.id] ?? 1));
+            const visible = paginate(filtered, discPageSafe, pageSize);
+            const discovering = busy === `discover-${p.id}` || busy === `refresh-${p.id}`;
             const open = openId === p.id;
             const enabledModels = p.models.filter((m) => m.enabled).length;
             const lastOk = timeAgo(p.health?.last_success);
+            const draftId = (modelDraft[p.id] ?? "").trim();
+            const draftDuplicate = isDuplicateModel(p.models.map((m) => m.id), draftId);
             return (
               <div key={p.id} className={`prov-card${open ? " open" : ""}${p.enabled ? "" : " off"}`}>
                 <div className="prov-head" role="button" tabIndex={0}
@@ -255,6 +354,10 @@ export default function AiProvidersSection({
                       aria-label={`Aktifkan ${p.name}`}
                     />
                   </label>
+                  <span className="prov-head-actions" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <IconButton icon="edit" label={`Edit provider ${p.name}`} title="Edit provider" onClick={() => openEdit(p)} disabled={busy !== null} />
+                    <IconButton icon="trash" label={`Hapus provider ${p.name}`} title="Hapus provider" variant="danger" onClick={() => setDeleteTarget(p)} disabled={busy !== null} />
+                  </span>
                   <span className={`coll-chev${open ? " open" : ""}`} aria-hidden="true">
                     <Icon name="chevD" size={16} />
                   </span>
@@ -279,8 +382,8 @@ export default function AiProvidersSection({
                       <li>
                         <span>Prioritas</span>
                         <span className="row" style={{ gap: 4 }}>
-                          <button type="button" className="btn btn-icon btn-sm" disabled={busy !== null || pi === 0} onClick={() => moveProvider(pi, -1)} aria-label="Naikkan prioritas provider" title="Naikkan prioritas"><Icon name="chevU" size={14} /></button>
-                          <button type="button" className="btn btn-icon btn-sm" disabled={busy !== null || pi === providers.length - 1} onClick={() => moveProvider(pi, 1)} aria-label="Turunkan prioritas provider" title="Turunkan prioritas"><Icon name="chevD" size={14} /></button>
+                          <IconButton icon="chevU" label="Naikkan prioritas provider" title="Naikkan prioritas" onClick={() => moveProvider(pi, -1)} disabled={busy !== null || pi === 0} />
+                          <IconButton icon="chevD" label="Turunkan prioritas provider" title="Turunkan prioritas" onClick={() => moveProvider(pi, 1)} disabled={busy !== null || pi === providers.length - 1} />
                         </span>
                       </li>
                       {typeof p.success_rate === "number" && (
@@ -293,7 +396,8 @@ export default function AiProvidersSection({
 
                     <div className="prov-actions">
                       <button type="button" className="btn btn-tonal btn-sm" disabled={busy !== null} onClick={() => onTest(p)}>Uji Koneksi</button>
-                      <button type="button" className="btn btn-text btn-sm" disabled={busy !== null} onClick={() => onDiscover(p)}>Temukan Model</button>
+                      <button type="button" className="btn btn-text btn-sm" disabled={busy !== null} onClick={() => openEdit(p)}>Edit Provider</button>
+                      <button type="button" className="btn btn-text btn-sm" disabled={busy !== null} onClick={() => onDiscover(p)}>{discovering ? "Mencari…" : "Temukan Model"}</button>
                       <button type="button" className="btn btn-text btn-sm" disabled={busy !== null} onClick={() => onRefreshModels(p)}>Segarkan</button>
                     </div>
 
@@ -309,42 +413,94 @@ export default function AiProvidersSection({
                             {p.unavailable_models.includes(m.id) && <span className="mini-chip mini-chip-failed">TIDAK TERSEDIA</span>}
                             {!m.enabled && <span className="mini-chip">NONAKTIF</span>}
                             <span className="model-ops">
-                              <button type="button" className={`btn btn-icon btn-sm${m.enabled ? "" : " btn-danger-ghost"}`} onClick={() => toggleModel(p, m.id)} disabled={busy !== null} aria-label={m.enabled ? `Nonaktifkan ${m.id}` : `Aktifkan ${m.id}`} title={m.enabled ? "Nonaktifkan" : "Aktifkan"}>
-                                <Icon name={m.enabled ? "check" : "close"} size={13} />
-                              </button>
-                              <button type="button" className="btn btn-icon btn-sm" onClick={() => moveModel(p, mi, -1)} disabled={busy !== null || mi === 0} aria-label="Naikkan model" title="Naikkan prioritas"><Icon name="chevU" size={13} /></button>
-                              <button type="button" className="btn btn-icon btn-sm" onClick={() => moveModel(p, mi, 1)} disabled={busy !== null || mi === p.models.length - 1} aria-label="Turunkan model" title="Turunkan prioritas"><Icon name="chevD" size={13} /></button>
-                              <button type="button" className="btn btn-icon btn-sm btn-danger-ghost" onClick={() => removeModel(p, m.id)} disabled={busy !== null} aria-label={`Hapus ${m.id}`} title="Hapus model"><Icon name="close" size={13} /></button>
+                              <IconButton
+                                icon={m.enabled ? "check" : "close"}
+                                label={m.enabled ? `Nonaktifkan ${m.id}` : `Aktifkan ${m.id}`}
+                                title={m.enabled ? "Nonaktifkan" : "Aktifkan"}
+                                onClick={() => toggleModel(p, m.id)}
+                                disabled={busy !== null}
+                              />
+                              <IconButton icon="chevU" label={`Naikkan prioritas ${m.id}`} title="Naikkan prioritas" onClick={() => moveModel(p, mi, -1)} disabled={busy !== null || mi === 0} />
+                              <IconButton icon="chevD" label={`Turunkan prioritas ${m.id}`} title="Turunkan prioritas" onClick={() => moveModel(p, mi, 1)} disabled={busy !== null || mi === p.models.length - 1} />
+                              <IconButton icon="trash" label={`Hapus ${m.id}`} title="Hapus model" variant="danger" onClick={() => removeModel(p, m.id)} disabled={busy !== null} />
                             </span>
                           </li>
                         ))}
                       </ul>
                     )}
-                    <div className="row model-add">
+                    <div className="row model-add-row">
                       <input
                         value={modelDraft[p.id] ?? ""}
                         onChange={(e) => setModelDraft((d) => ({ ...d, [p.id]: e.target.value }))}
-                        placeholder="tambah model id…" aria-label={`Tambah model ke ${p.name}`}
+                        onKeyDown={(e) => { if (e.key === "Enter" && draftId && !draftDuplicate) addModel(p); }}
+                        placeholder="tambah model id…"
+                        aria-label={`Tambah model ke ${p.name}`}
                       />
-                      <button type="button" className="btn btn-icon btn-sm" disabled={busy !== null} onClick={() => addModel(p)} aria-label="Tambah model" title="Tambah model"><Icon name="plus" size={14} /></button>
+                      <IconButton
+                        icon="plus"
+                        label={draftDuplicate ? "Model sudah ada di provider ini" : `Tambah model ke ${p.name}`}
+                        title={draftDuplicate ? "Model sudah ada" : "Tambah model"}
+                        variant="primary"
+                        onClick={() => addModel(p)}
+                        disabled={busy !== null || !draftId || draftDuplicate}
+                      />
                     </div>
+                    {draftDuplicate && (
+                      <p className="muted"><small>Model sudah ada di provider ini.</small></p>
+                    )}
 
-                    {discovered.length > 0 && (
-                      <Collapsible title={`Hasil Temuan (${discovered.length})`} subtitle="Discovery terakhir" defaultOpen={false}>
-                        <ul className="mini-list model-list">
-                          {discovered.slice(0, 20).map((m) => (
-                            <li key={m.id} className="model-row">
-                              <span className="link-row-main">
-                                <strong className="ellipsis" title={m.id}>{m.display_name || m.id}</strong>
-                                {m.marked_unavailable && <span className="mini-chip mini-chip-failed">TIDAK TERSEDIA</span>}
-                                {m.configured && <span className="mini-chip mini-chip-done">DIKONFIGURASI</span>}
+                    {(allDiscovered.length > 0 || discError[p.id]) && (
+                      <Collapsible title={`Hasil Temuan (${allDiscovered.length})`} subtitle="Discovery terakhir" defaultOpen={false}>
+                        <div className="discovery-toolbar">
+                          <SearchInput
+                            value={query}
+                            onChange={(v) => { setDiscQuery((s) => ({ ...s, [p.id]: v })); resetDiscoveryPage(p.id); }}
+                            placeholder="Cari model…"
+                            ariaLabel={`Cari hasil temuan ${p.name}`}
+                          />
+                          <span className="discovery-count" role="status">
+                            {query.trim()
+                              ? `${filtered.length} dari ${allDiscovered.length} model`
+                              : `${allDiscovered.length} model`}
+                            {discovering ? " · memuat…" : ""}
+                          </span>
+                        </div>
+                        {discError[p.id] && (
+                          <p className="banner banner-error" role="alert">{discError[p.id]}</p>
+                        )}
+                        {filtered.length === 0 ? (
+                          <p className="muted"><small>{query.trim() ? "Tidak ada model yang cocok dengan pencarian." : "Belum ada hasil discovery."}</small></p>
+                        ) : (
+                          <>
+                            <ul className="mini-list model-list">
+                              {visible.map((m) => (
+                                <li key={m.id} className="model-row">
+                                  <span className="link-row-main">
+                                    <strong className="ellipsis" title={m.id}>{m.display_name || m.id}</strong>
+                                    {m.marked_unavailable && <span className="mini-chip mini-chip-failed">TIDAK TERSEDIA</span>}
+                                    {m.configured && <span className="mini-chip mini-chip-done">DIKONFIGURASI</span>}
+                                  </span>
+                                  {!m.configured && (
+                                    <button type="button" className="btn btn-tonal btn-sm" disabled={busy !== null} onClick={() => adoptDiscovered(p, m.id)}>Tambah</button>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                            <div className="discovery-foot">
+                              <span className="discovery-count">
+                                Menampilkan {visible.length > 0 ? `${(discPageSafe - 1) * pageSize + 1}–${(discPageSafe - 1) * pageSize + visible.length} dari ${filtered.length}` : "0"}
                               </span>
-                              {!m.configured && (
-                                <button type="button" className="btn btn-tonal btn-sm" disabled={busy !== null} onClick={() => adoptDiscovered(p, m.id)}>Tambah</button>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
+                              <Pagination
+                                page={discPageSafe}
+                                totalPages={totalPages}
+                                total={filtered.length}
+                                pageSize={pageSize}
+                                onPage={(n) => setDiscPage((s) => ({ ...s, [p.id]: n }))}
+                                onPageSizeChange={(n) => { setDiscSize((s) => ({ ...s, [p.id]: n })); resetDiscoveryPage(p.id); }}
+                              />
+                            </div>
+                          </>
+                        )}
                       </Collapsible>
                     )}
 
@@ -427,10 +583,6 @@ export default function AiProvidersSection({
                           type="button" className="btn btn-text btn-sm" disabled={busy !== null}
                           onClick={() => wrap(`reset-${p.id}`, () => resetProviderHealth(apiBase, p.id), "Kesehatan provider direset")}
                         >Atur Ulang Kesehatan</button>
-                        <button
-                          type="button" className="btn btn-text btn-sm btn-danger" disabled={busy !== null}
-                          onClick={() => { if (window.confirm(`Hapus ${p.name}?`)) void wrap(`del-${p.id}`, () => deleteProvider(apiBase, p.id), "Provider dihapus"); }}
-                        >Hapus Provider</button>
                       </div>
                     </Collapsible>
                   </div>
@@ -467,6 +619,76 @@ export default function AiProvidersSection({
           </div>
         </div>
       )}
+
+      {editTarget && (
+        <div className="dialog-scrim" onClick={() => busy === null && setEditTarget(null)} role="presentation">
+          <div className="dialog" role="dialog" aria-modal="true" aria-label={`Edit provider ${editTarget.name}`} onClick={(e) => e.stopPropagation()}>
+            <h3 className="dialog-title">Edit Provider</h3>
+            <p className="hint">ID internal <span className="mono-sm">{editTarget.id}</span> tetap stabil — nama bebas diubah tanpa merusak referensi.</p>
+            <div className="form">
+              <div className="field">
+                <label htmlFor="edit-prov-name">Nama Provider</label>
+                <input id="edit-prov-name" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Gemini Utama" autoComplete="off" />
+                {editNameError && <p className="field-err" role="alert">{editNameError}</p>}
+              </div>
+              <div className="field">
+                <label htmlFor="edit-prov-key">API Key {editTarget.key_configured && <span className="mini-chip">••••{editTarget.key_suffix}</span>}</label>
+                <input
+                  id="edit-prov-key"
+                  value={editKey}
+                  onChange={(e) => setEditKey(e.target.value)}
+                  placeholder="Kosongkan untuk mempertahankan key lama"
+                  type="password"
+                  autoComplete="new-password"
+                />
+                <p className="hint">Dikosongkan = secret lama dipertahankan. Key tidak pernah ditampilkan utuh.</p>
+              </div>
+              <div className="field">
+                <div className="set-label"><label htmlFor="edit-prov-priority">Prioritas</label></div>
+                <input
+                  id="edit-prov-priority"
+                  type="number" min={1} step={1}
+                  value={editPriority}
+                  onChange={(e) => setEditPriority(Number(e.target.value))}
+                />
+              </div>
+              <label className="check check-row">
+                <input type="checkbox" checked={editEnabled} onChange={(e) => setEditEnabled(e.target.checked)} />
+                <span>Aktifkan provider</span>
+              </label>
+            </div>
+            <div className="dialog-actions">
+              <button type="button" className="btn btn-text" onClick={() => setEditTarget(null)} disabled={busy !== null}>
+                Batal
+              </button>
+              <button
+                type="button"
+                className="btn btn-filled"
+                onClick={onSaveEdit}
+                disabled={busy !== null || !!editNameError}
+                autoFocus
+              >
+                {busy === `edit-${editTarget.id}` ? "Menyimpan…" : "Simpan Perubahan"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Hapus provider?"
+        message={
+          deleteTarget
+            ? `Provider "${deleteTarget.name}" dan konfigurasi model fallback-nya akan dihapus.${deleteTargetActive ? " Provider ini sedang AKTIF dan dipakai konfigurasi berjalan." : ""}`
+            : ""
+        }
+        confirmLabel="Hapus"
+        danger
+        busy={busy !== null}
+        onConfirm={onConfirmDelete}
+        onClose={() => busy === null && setDeleteTarget(null)}
+      />
     </section>
   );
 }

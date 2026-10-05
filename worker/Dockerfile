@@ -11,11 +11,12 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY worker/entrypoint.sh ./entrypoint.sh
-COPY models/blaze_face_short_range.tflite models/yolo26n-face.pt ./models/
-# TalkNet TalkSet weights (MIT, see src/gaeclip/talknet/NOTICE). Needed at
-# runtime for active-speaker escalation; heuristic-only mode works without
-# torch but WITH torch TalkNet actually runs.
-COPY models/TalkNet-ASD/pretrain_TalkSet.model ./models/TalkNet-ASD/
+COPY models/blaze_face_short_range.tflite models/yolo26n-face.pt models/pretrain_TalkSet.model ./models/
+# TalkNet TalkSet weights (MIT, see src/gaeclip/talknet/NOTICE). Lives flat
+# in models/ (repo root) so git can track it via LFS — the TalkNet-ASD/
+# source clone stays a local-only reference. Needed at runtime for
+# active-speaker escalation; heuristic-only mode works without torch
+# but WITH torch TalkNet actually runs.
 RUN pip install --no-cache-dir -e ".[api,llm,transcription,framing]" \
   && chmod +x ./entrypoint.sh
 # CPU-only torch for TalkNet (CUDA images stay lean on purpose; a CUDA

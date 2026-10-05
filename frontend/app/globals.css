@@ -588,7 +588,7 @@ a { color: var(--md-primary); }
 .settings-nav button[aria-current="page"] { background: var(--md-primary-container); color: var(--md-on-primary-container); }
 .settings-nav button[aria-current="page"] small { color: var(--md-on-primary-container); }
 .settings-search { margin-bottom: 12px; position: relative; }
-.settings-search input { width: 100%; height: 42px; }
+.settings-search .search-input { min-height: 42px; }
 .settings-hits { position: absolute; z-index: 20; inset-inline: 0; top: calc(100% + 4px); background: var(--md-surface-container); border: 1px solid var(--md-outline-variant); border-radius: var(--radius-m); box-shadow: var(--shadow-2); overflow: hidden; }
 .settings-hits button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 9px 12px; cursor: pointer; color: var(--md-on-surface); }
 .settings-hits button:hover, .settings-hits button:focus-visible { background: var(--md-surface-high); }
@@ -638,4 +638,224 @@ a { color: var(--md-primary); }
   .settings-nav { position: static; flex-direction: row; overflow-x: auto; padding: 4px 2px 8px; }
   .settings-nav button { flex: 0 0 auto; min-width: 120px; }
   .settings-content { max-width: none; }
+}
+
+/* ── Design system: icon-only buttons ──
+   Root cause of the "white-on-white" reports: the legacy `.btn-icon`
+   had NO background/border of its own (transparent + inherit), so
+   icon-only actions rendered as floating glyphs with no hover
+   affordance. `.iconbtn` always paints a real surface + border +
+   icon tint from theme tokens, in both light and dark theme. */
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+.iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; padding: 0; cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease);
+}
+.iconbtn svg { flex: 0 0 auto; }
+.iconbtn-sm { width: 32px; height: 32px; min-width: 32px; min-height: 32px; }
+.iconbtn-md { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
+.iconbtn:active { transform: scale(0.94); }
+
+/* SECONDARY (default list action: move/edit/refresh/expand/add) */
+.iconbtn-secondary {
+  background: var(--md-surface-highest);
+  border: 1px solid var(--md-outline);
+  color: var(--md-on-surface);
+}
+.iconbtn-secondary:hover {
+  background: var(--md-surface-high);
+  border-color: var(--md-on-variant);
+  color: var(--md-on-surface);
+}
+
+/* GHOST (toolbar affordance, search clear) */
+.iconbtn-ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--md-on-variant);
+}
+.iconbtn-ghost:hover {
+  background: var(--md-surface-high);
+  border-color: var(--md-outline-variant);
+  color: var(--md-on-surface);
+}
+
+/* DANGER (delete/remove — never confusable with move/edit:
+   error-tinted border + icon, error fill on hover) */
+.iconbtn-danger {
+  background: transparent;
+  border: 1px solid var(--md-outline-variant);
+  color: var(--md-error);
+}
+.iconbtn-danger:hover {
+  background: var(--md-error-container);
+  border-color: var(--md-error);
+  color: var(--md-on-error-container);
+}
+
+/* PRIMARY (single primary row action, e.g. Add model) */
+.iconbtn-primary {
+  background: var(--md-primary);
+  border: 1px solid transparent;
+  color: var(--md-on-primary);
+}
+.iconbtn-primary:hover { box-shadow: var(--shadow-1); }
+
+.iconbtn:disabled, .iconbtn.is-disabled {
+  cursor: not-allowed; opacity: 0.55; transform: none; box-shadow: none;
+}
+.iconbtn-secondary:disabled {
+  background: var(--md-surface-container);
+  border-color: var(--md-outline-variant);
+  color: var(--md-on-variant);
+}
+.iconbtn-danger:disabled {
+  background: transparent;
+  border-color: var(--md-outline-variant);
+  color: var(--md-on-variant);
+}
+.iconbtn-primary:disabled {
+  background: var(--md-surface-highest);
+  border-color: var(--md-outline-variant);
+  color: var(--md-on-variant);
+}
+.iconbtn:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+
+/* Legacy .btn-icon without a tone variant: give it the same guaranteed
+   surface so no icon-only button can ever be borderless-on-nothing. */
+.btn-icon:not(.btn-filled):not(.btn-tonal):not(.btn-text):not(.btn-danger):not(.btn-danger-ghost):not(.btn-ghost):not(.btn-table-action) {
+  background: var(--md-surface-highest);
+  border: 1px solid var(--md-outline);
+  color: var(--md-on-surface);
+  border-radius: 8px;
+}
+.btn-icon:not(.btn-filled):not(.btn-tonal):not(.btn-text):not(.btn-danger):not(.btn-danger-ghost):not(.btn-ghost):not(.btn-table-action):hover {
+  background: var(--md-surface-high);
+  border-color: var(--md-on-variant);
+}
+.btn-icon:not(.btn-filled):not(.btn-tonal):not(.btn-text):not(.btn-danger):not(.btn-danger-ghost):not(.btn-ghost):not(.btn-table-action):disabled {
+  background: var(--md-surface-container);
+  border-color: var(--md-outline-variant);
+  color: var(--md-on-variant);
+  opacity: 0.6;
+}
+
+/* ── Design system: search input (icon + clear-X contract) ── */
+
+.search-input {
+  display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0;
+  background: var(--md-surface);
+  border: 1px solid var(--md-outline);
+  border-radius: var(--radius-full);
+  padding: 0 6px 0 12px;
+}
+.search-input:focus-within {
+  border-color: var(--md-primary);
+  outline: 2px solid var(--md-primary);
+  outline-offset: -1px;
+}
+.search-input-icon { display: grid; place-items: center; color: var(--md-on-variant); flex: 0 0 auto; }
+.search-input input {
+  flex: 1; min-width: 0; border: 0; background: transparent;
+  min-height: 34px; outline: none; font-size: 13px;
+  color: var(--md-on-surface);
+}
+.search-input input::placeholder { color: var(--md-on-variant); opacity: 0.85; }
+.search-input-clear {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; flex: 0 0 auto; cursor: pointer;
+  border-radius: 50%; background: transparent;
+  border: 1px solid transparent; color: var(--md-on-variant);
+}
+.search-input-clear:hover {
+  background: var(--md-surface-highest);
+  border-color: var(--md-outline-variant);
+  color: var(--md-on-surface);
+}
+.search-input-clear:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 1px; }
+.search-input-clear:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Legacy .search clear affordance (jobs/clips toolbars) */
+.search .btn-icon.btn-sm {
+  width: 28px; height: 28px; min-width: 28px; min-height: 28px; border-radius: 50%;
+}
+
+/* Readable placeholder + text in every settings surface */
+input::placeholder, textarea::placeholder { color: var(--md-on-variant); opacity: 0.85; }
+.set-field input, .set-field select,
+.model-add-row input, .dialog .field input,
+.pager-jump input, .toolbar select {
+  color: var(--md-on-surface);
+}
+
+/* ── Design system: pagination ── */
+
+.pager { flex-wrap: wrap; }
+.pager-numbers { display: inline-flex; align-items: center; gap: 4px; }
+.pager-num {
+  min-width: 30px; height: 30px; padding: 0 8px; cursor: pointer;
+  border-radius: 8px; font-size: 12.5px; font-weight: 700;
+  background: var(--md-surface-highest);
+  border: 1px solid var(--md-outline-variant);
+  color: var(--md-on-surface);
+}
+.pager-num:hover { background: var(--md-surface-high); border-color: var(--md-on-variant); }
+.pager-num:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.pager-num.is-current, .pager-num:disabled {
+  background: var(--md-primary-container);
+  border-color: transparent;
+  color: var(--md-on-primary-container);
+  cursor: default; opacity: 1;
+}
+.pager-size select {
+  min-height: 30px; padding: 0 8px; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--md-outline); border-radius: var(--radius-s);
+  background: var(--md-surface); color: var(--md-on-surface);
+}
+
+/* ── Provider cards: header actions + add-model control group ── */
+
+.prov-head-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.model-add-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+.model-add-row input {
+  flex: 1; min-width: 0; min-height: 36px; padding: 0 10px;
+  border: 1px solid var(--md-outline); border-radius: var(--radius-s);
+  background: var(--md-surface); font-size: 13px;
+}
+.model-add-row input:focus { outline: 2px solid var(--md-primary); outline-offset: 0; border-color: var(--md-primary); }
+
+/* ── Discovery toolbar (search + count + refresh state) ── */
+
+.discovery-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.discovery-toolbar .search-input { flex: 1 1 200px; }
+.discovery-count { font-size: 12px; color: var(--md-on-variant); white-space: nowrap; }
+.discovery-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
+/* ── Provider dialogs ── */
+
+.dialog .form { margin-top: 10px; }
+.dialog .field label { font-size: 12px; font-weight: 600; }
+.dialog .field input {
+  min-height: 38px; padding: 0 10px; width: 100%;
+  border: 1px solid var(--md-outline); border-radius: var(--radius-s);
+  background: var(--md-surface); font-size: 13px;
+}
+.dialog .field input:focus { outline: 2px solid var(--md-primary); outline-offset: 0; border-color: var(--md-primary); }
+.dialog .field-err { margin: 0; color: var(--md-error); font-size: 12px; }
+.dialog .check-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.dialog .hint { margin: 0; font-size: 12px; color: var(--md-on-variant); }
+
+/* Icon-button action groups stay usable on narrow windows */
+.prov-actions, .prov-head-actions, .model-ops { flex-wrap: wrap; }
+@media (max-width: 560px) {
+  .prov-head { flex-wrap: wrap; min-height: 0; }
+  .model-ops { margin-left: 0; }
 }

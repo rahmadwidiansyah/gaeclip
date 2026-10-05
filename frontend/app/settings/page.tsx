@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { Collapsible, ConfirmDialog, Icon, PageHeader } from "../components/ui";
+import { Collapsible, ConfirmDialog, PageHeader, SearchInput } from "../components/ui";
 import AiModelsSection from "./ai-models";
 import AiProvidersSection from "./ai-providers";
 import {
@@ -869,17 +869,16 @@ export default function SettingsPage() {
       <PageHeader eyebrow="PENGATURAN" title="Pengaturan" desc="Perilaku aplikasi, koneksi, dan informasi sistem." />
 
       <div className="settings-search">
-        <input
-          type="search"
+        <SearchInput
           value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
+          onChange={(v) => {
+            setQuery(v);
             setHitsOpen(true);
           }}
           onFocus={() => setHitsOpen(true)}
           onBlur={() => setTimeout(() => setHitsOpen(false), 120)}
           placeholder="Cari pengaturan… (mis. timeout, provider, fps)"
-          aria-label="Cari pengaturan"
+          ariaLabel="Cari pengaturan"
         />
         {hitsOpen && searchHits.length > 0 && (
           <div className="settings-hits" role="listbox" aria-label="Hasil pencarian">

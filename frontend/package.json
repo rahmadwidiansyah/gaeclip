@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "test": "node --experimental-strip-types --test app/lib/format.test.ts app/lib/subtitles.test.ts app/lib/clips.test.ts app/lib/icons.test.ts app/lib/ai-models.test.ts app/lib/ai-providers.test.ts app/lib/settings-nav.test.ts",
+    "test": "node --experimental-strip-types --test app/lib/format.test.ts app/lib/subtitles.test.ts app/lib/clips.test.ts app/lib/icons.test.ts app/lib/ai-models.test.ts app/lib/ai-providers.test.ts app/lib/settings-nav.test.ts app/lib/pagination.test.ts app/lib/provider-forms.test.ts",
     "start": "next start -p 3000"
   },
   "dependencies": {

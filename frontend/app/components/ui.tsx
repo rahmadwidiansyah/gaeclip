@@ -165,37 +165,203 @@ export function Collapsible({
   );
 }
 
-/* ── Pagination ── */
+/* ── IconButton (design-system icon-only action) ──
+   Variants:
+   - secondary: bordered surface button (default for list actions:
+     move up/down, edit, refresh, expand, add). Always visible on
+     both light + dark theme — never white-on-white.
+   - ghost: transparent until hover (toolbar/secondary affordances).
+   - danger: destructive actions (delete/remove). Visually distinct
+     from move/edit via error tones, not color alone (see CSS:
+     border + icon tint).
+   - primary: filled accent for the single primary row action.
+   Every instance REQUIRES `label` (aria-label) and renders `title`
+   as tooltip so icon-only actions are never a guessing game. */
+
+export type IconButtonVariant = "secondary" | "ghost" | "danger" | "primary";
+export type IconButtonSize = "sm" | "md";
+
+export function IconButton({
+  icon,
+  label,
+  title,
+  variant = "secondary",
+  size = "sm",
+  iconSize,
+  ...rest
+}: {
+  icon: IconName;
+  /** Accessible name — required. Tooltip falls back to this. */
+  label: string;
+  title?: string;
+  variant?: IconButtonVariant;
+  size?: IconButtonSize;
+  iconSize?: number;
+} & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title">) {
+  return (
+    <button
+      type="button"
+      {...rest}
+      className={`iconbtn iconbtn-${variant} iconbtn-${size}${rest.className ? ` ${rest.className}` : ""}${rest.disabled ? " is-disabled" : ""}`}
+      aria-label={rest["aria-label"] ?? label}
+      title={title ?? label}
+    >
+      <Icon name={icon} size={iconSize ?? (size === "sm" ? 14 : 16)} />
+    </button>
+  );
+}
+
+/* ── SearchInput (icon + clear-X contract) ──
+   - Leading search glyph, trailing clear button shown ONLY when
+     `value` is non-empty.
+   - Clear resets the query ("", not a visual-only wipe) and calls
+     `onClear` so callers can also reset pagination/filter state. */
+
+export function SearchInput({
+  value,
+  onChange,
+  onClear,
+  placeholder = "Cari…",
+  ariaLabel = "Cari",
+  clearLabel = "Bersihkan pencarian",
+  id,
+  disabled = false,
+  onFocus,
+  onBlur,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onClear?: () => void;
+  placeholder?: string;
+  ariaLabel?: string;
+  clearLabel?: string;
+  id?: string;
+  disabled?: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
+}) {
+  return (
+    <div className="search-input">
+      <span className="search-input-icon" aria-hidden="true">
+        <Icon name="search" size={16} />
+      </span>
+      <input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        disabled={disabled}
+        autoComplete="off"
+        spellCheck={false}
+      />
+      {value !== "" && (
+        <button
+          type="button"
+          className="search-input-clear"
+          onClick={() => {
+            onChange("");
+            onClear?.();
+          }}
+          aria-label={clearLabel}
+          title={clearLabel}
+          disabled={disabled}
+        >
+          <Icon name="close" size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ── Pagination ──
+   Numbered, keyboard-friendly pager shared by every long list.
+   Backward compatible: <Pagination page totalPages onPage /> keeps
+   working (jump box + Hal x/y). New callers pass `total` (+`pageSize`
+   +`onPageSizeChange`) to get numbered buttons and a page-size
+   selector; the indicator then reads from the real item count. */
+
+export const PAGINATION_SIZE_OPTIONS = [10, 20, 50] as const;
+
+function pageWindow(current: number, totalPages: number, maxButtons = 5): number[] {
+  const total = Math.max(1, totalPages);
+  const cur = Math.min(total, Math.max(1, current));
+  const size = Math.min(maxButtons, total);
+  let start = cur - Math.floor(size / 2);
+  start = Math.max(1, Math.min(start, total - size + 1));
+  return Array.from({ length: size }, (_, i) => start + i);
+}
 
 export function Pagination({
   page,
   totalPages,
   onPage,
+  total,
+  pageSize,
+  onPageSizeChange,
+  maxButtons = 5,
 }: {
   page: number;
   totalPages: number;
   onPage: (p: number) => void;
+  /** Real item count — enables numbered buttons + range label. */
+  total?: number;
+  pageSize?: number;
+  onPageSizeChange?: (n: number) => void;
+  maxButtons?: number;
 }) {
   const [jump, setJump] = useState("");
   if (totalPages <= 1) return null;
+  const safePage = Math.min(totalPages, Math.max(1, page));
+  const numbers = pageWindow(safePage, totalPages, maxButtons);
   return (
-    <div className="pager">
-      <button type="button" className="btn btn-icon" disabled={page <= 1} onClick={() => onPage(page - 1)} aria-label="Halaman sebelumnya" title="Sebelumnya">
+    <div className="pager" role="navigation" aria-label="Pagination">
+      <button type="button" className="iconbtn iconbtn-secondary iconbtn-sm" disabled={safePage <= 1} onClick={() => onPage(safePage - 1)} aria-label="Halaman sebelumnya" title="Halaman sebelumnya">
         <Icon name="chevL" size={16} />
       </button>
-      <span className="pager-info">
-        Hal {page} / {totalPages}
+      <span className="pager-numbers" role="list">
+        {numbers.map((n) => (
+          <button
+            key={n}
+            type="button"
+            role="listitem"
+            className={`pager-num${n === safePage ? " is-current" : ""}`}
+            aria-label={`Halaman ${n}`}
+            aria-current={n === safePage ? "page" : undefined}
+            onClick={() => onPage(n)}
+            disabled={n === safePage}
+          >
+            {n}
+          </button>
+        ))}
       </span>
       <button
         type="button"
-        className="btn btn-icon"
-        disabled={page >= totalPages}
-        onClick={() => onPage(page + 1)}
+        className="iconbtn iconbtn-secondary iconbtn-sm"
+        disabled={safePage >= totalPages}
+        onClick={() => onPage(safePage + 1)}
         aria-label="Halaman berikut"
-        title="Berikutnya"
+        title="Halaman berikut"
       >
         <Icon name="chevR" size={16} />
       </button>
+      <span className="pager-info">
+        {typeof total === "number" ? `${total} item · ` : ""}Hal {safePage} / {totalPages}
+      </span>
+      {pageSize != null && onPageSizeChange && (
+        <label className="pager-size">
+          <span className="sr-only">Item per halaman</span>
+          <select value={pageSize} onChange={(e) => onPageSizeChange(Number(e.target.value))} aria-label="Item per halaman" title="Item per halaman">
+            {PAGINATION_SIZE_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n}/hal
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <form
         className="pager-jump"
         onSubmit={(e) => {

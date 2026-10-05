@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Collapsible, Icon } from "../components/ui";
+import { Collapsible, Icon, IconButton, Pagination, SearchInput } from "../components/ui";
 import { getAiModels, getAiSelection, patchAppSettings, refreshAiModels, formatTime } from "../lib/api";
 import { channelBadge, filterModels, pricingBadge, selectableModels, sortModels, type ModelFacet } from "../lib/ai-models";
+import { DEFAULT_PAGE_SIZE, pageCount, paginate } from "../lib/pagination";
 import type { AiModelInfo, AiSelection } from "../lib/types";
 
 const MAX_FALLBACKS = 5;
@@ -62,6 +63,10 @@ export default function AiModelsSection({
 
   const [q, setQ] = useState("");
   const [facet, setFacet] = useState<ModelFacet>("all");
+  // Browse pagination: full filtered list is always retained; only the
+  // rendered slice is paged (all -> filtered -> paginated -> render).
+  const [browsePage, setBrowsePage] = useState(1);
+  const [browseSize, setBrowseSize] = useState<number>(DEFAULT_PAGE_SIZE);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -110,6 +115,7 @@ export default function AiModelsSection({
       setDiscoveredAt(res.discovered_at);
       setSelection(res.selection);
       setLoadError(null);
+      setBrowsePage(1);
       push(`Discovery: ${res.discovered} model, ${res.compatible} kompatibel`, "success");
     } catch (e) {
       push(e instanceof Error ? e.message : "Refresh gagal", "error");
@@ -126,6 +132,9 @@ export default function AiModelsSection({
     () => (models ? filterModels(sortModels(models), q, facet) : []),
     [models, q, facet]
   );
+  const browseTotalPages = pageCount(browsable.length, browseSize);
+  const browseSafePage = Math.min(browseTotalPages, Math.max(1, browsePage));
+  const browseVisible = paginate(browsable, browseSafePage, browseSize);
   const chosen = useMemo(() => new Set([primary, ...fallbacks].filter(Boolean)), [primary, fallbacks]);
   // Current primary kept visible even when it left the registry (Q).
   const primaryMissing = primary !== "" && models !== null && !models.some((m) => m.id === primary);
@@ -296,15 +305,9 @@ export default function AiModelsSection({
                         </option>
                       ))}
                   </select>
-                  <button type="button" className="btn btn-icon btn-sm" onClick={() => moveFallback(i, -1)} disabled={i === 0} aria-label={`Naikkan fallback ${i + 1}`}>
-                    <Icon name="chevU" size={14} />
-                  </button>
-                  <button type="button" className="btn btn-icon btn-sm" onClick={() => moveFallback(i, 1)} disabled={i === fallbacks.length - 1} aria-label={`Turunkan fallback ${i + 1}`}>
-                    <Icon name="chevD" size={14} />
-                  </button>
-                  <button type="button" className="btn btn-icon btn-sm btn-danger-ghost" onClick={() => setFallbacks((cur) => cur.filter((_, j) => j !== i))} aria-label={`Hapus fallback ${i + 1}`}>
-                    <Icon name="close" size={14} />
-                  </button>
+                  <IconButton icon="chevU" label={`Naikkan fallback ${i + 1}`} title="Naikkan prioritas" onClick={() => moveFallback(i, -1)} disabled={i === 0} />
+                  <IconButton icon="chevD" label={`Turunkan fallback ${i + 1}`} title="Turunkan prioritas" onClick={() => moveFallback(i, 1)} disabled={i === fallbacks.length - 1} />
+                  <IconButton icon="trash" label={`Hapus fallback ${i + 1}`} title="Hapus model" variant="danger" onClick={() => setFallbacks((cur) => cur.filter((_, j) => j !== i))} />
                 </div>
               ))}
             </div>
@@ -318,15 +321,17 @@ export default function AiModelsSection({
           <h3 className="subhead">Model yang Tersedia</h3>
           <Collapsible
             title="Jelajahi model"
-            subtitle={`${browsable.length} ditampilkan · cari & filter di dalam`}
+            subtitle={`${browsable.length} ditemukan · ${browseVisible.length} ditampilkan · hal ${browseSafePage}/${browseTotalPages}`}
             defaultOpen={false}
           >
           <div className="toolbar">
-            <div className="search">
-              <Icon name="search" size={16} />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari model…" aria-label="Cari model" />
-            </div>
-            <select value={facet} onChange={(e) => setFacet(e.target.value as ModelFacet)} aria-label="Filter model">
+            <SearchInput
+              value={q}
+              onChange={(v) => { setQ(v); setBrowsePage(1); }}
+              placeholder="Cari model…"
+              ariaLabel="Cari model"
+            />
+            <select value={facet} onChange={(e) => { setFacet(e.target.value as ModelFacet); setBrowsePage(1); }} aria-label="Filter model">
               {FACETS.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.label}
@@ -335,7 +340,7 @@ export default function AiModelsSection({
             </select>
           </div>
           <ul className="mini-list model-list">
-            {browsable.slice(0, 30).map((m) => (
+            {browseVisible.map((m) => (
               <li key={m.id} className="model-row">
                 <span className="link-row-main">
                   <strong className="ellipsis" title={m.id}>{m.display_name}</strong>
@@ -345,7 +350,23 @@ export default function AiModelsSection({
               </li>
             ))}
           </ul>
-          {browsable.length > 30 && <p className="muted">+ {browsable.length - 30} model lain (gunakan pencarian/filter).</p>}
+          {browsable.length === 0 ? (
+            <p className="muted">Tidak ada model yang cocok dengan pencarian/filter.</p>
+          ) : (
+            <div className="discovery-foot">
+              <span className="discovery-count" role="status">
+                Menampilkan {(browseSafePage - 1) * browseSize + 1}–{(browseSafePage - 1) * browseSize + browseVisible.length} dari {browsable.length}
+              </span>
+              <Pagination
+                page={browseSafePage}
+                totalPages={browseTotalPages}
+                total={browsable.length}
+                pageSize={browseSize}
+                onPage={setBrowsePage}
+                onPageSizeChange={(n) => { setBrowseSize(n); setBrowsePage(1); }}
+              />
+            </div>
+          )}
           </Collapsible>
 
           {saveError && (

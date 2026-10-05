@@ -7,6 +7,7 @@ const USED = [
   "dashboard", "jobs", "clips", "settings",
   "plus", "search", "download", "close", "check", "alert",
   "clock", "chevL", "chevR", "chevD", "chevU", "refresh", "trash",
+  "edit",
   "sun", "moon", "monitor", "play", "link", "filter", "sort",
   "group", "calendar", "image", "copy",
   "star", "info", "circle", "loader",

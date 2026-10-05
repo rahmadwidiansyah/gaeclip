@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { EmptyState, Icon, PageHeader, Pagination, StatusChip } from "../components/ui";
+import { EmptyState, Icon, IconButton, PageHeader, Pagination, StatusChip } from "../components/ui";
 import { ALL, distinctChannels, filterClips, flattenClips, sortClips, type ClipSort } from "../lib/clips";
 import { clipUrl, formatBytes, formatClock } from "../lib/api";
 import { useJobs } from "../lib/hooks";
@@ -89,9 +89,7 @@ export default function ClipsPage() {
             aria-label="Cari clip"
           />
           {q && (
-            <button type="button" className="btn btn-icon btn-sm" onClick={() => { setQ(""); resetPage(); }} aria-label="Bersihkan pencarian">
-              <Icon name="close" size={14} />
-            </button>
+            <IconButton icon="close" label="Bersihkan pencarian" variant="ghost" onClick={() => { setQ(""); resetPage(); }} />
           )}
         </div>
         <select

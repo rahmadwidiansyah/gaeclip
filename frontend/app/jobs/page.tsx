@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ConfirmDialog, EmptyState, Icon, PageHeader, Pagination, ProgressBar, StatusChip } from "../components/ui";
+import { ConfirmDialog, EmptyState, Icon, IconButton, PageHeader, Pagination, ProgressBar, StatusChip } from "../components/ui";
 import {
   backfillVideos,
   cancelJob,
@@ -331,9 +331,7 @@ export default function JobsPage() {
             aria-label="Cari video, channel, job ID"
           />
           {q && (
-            <button type="button" className="btn btn-icon btn-sm" onClick={() => setQ("")} aria-label="Bersihkan pencarian">
-              <Icon name="close" size={14} />
-            </button>
+            <IconButton icon="close" label="Bersihkan pencarian" variant="ghost" onClick={() => setQ("")} />
           )}
         </div>
         <button
