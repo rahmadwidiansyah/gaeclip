@@ -62,7 +62,7 @@ def write_event(
             _rotate(path)
         record = {
             "ts": time.time(),
-            "iso": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ", time.gmtime()),
+            "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "action": action,
             "actor": actor,
             "job_id": job_id,
