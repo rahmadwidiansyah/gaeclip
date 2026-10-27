@@ -34,8 +34,11 @@ class LocalStorageBackendTests(unittest.TestCase):
             backend.upload("a/y.txt", io.BytesIO(b"y"), 1)
             backend.upload("b/z.txt", io.BytesIO(b"z"), 1)
             keys = sorted(backend.list_prefix("a"))
+            # Normalize to forward slashes for cross-platform comparison.
+            keys = [k.replace("\\", "/") for k in keys]
             self.assertEqual(keys, ["a/x.txt", "a/y.txt"])
             all_keys = sorted(backend.list_prefix(""))
+            all_keys = [k.replace("\\", "/") for k in all_keys]
             self.assertEqual(len(all_keys), 3)
 
 

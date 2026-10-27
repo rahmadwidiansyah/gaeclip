@@ -271,7 +271,10 @@ class BrandAvatarTests(unittest.TestCase):
             good.write_bytes(b"\x89PNG\r\n\x1a\nxxx")
             from pathlib import Path
 
-            self.assertEqual(resolve_asset_path("manual-abc123.png", Path(tmp)), good)
+            result = resolve_asset_path("manual-abc123.png", Path(tmp))
+            # Normalize for cross-platform comparison (Windows short names
+            # may differ from the temp dir name).
+            self.assertEqual(result.resolve(), good.resolve())
             for evil in ("../x.png", "/etc/passwd", "..\\x.png", "", "a/b.png"):
                 self.assertIsNone(resolve_asset_path(evil, Path(tmp)))
 
