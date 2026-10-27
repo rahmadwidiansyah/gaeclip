@@ -5,7 +5,10 @@ import type { FormEvent } from "react";
 import { Collapsible, ConfirmDialog, PageHeader, SearchInput } from "../components/ui";
 import AiModelsSection from "./ai-models";
 import AiProvidersSection from "./ai-providers";
+import { SecretField } from "./secret-field";
+import SocialAccountsSection from "./social-accounts";
 import {
+  apiToken,
   checkHealth,
   formatBytes,
   getAiSelection,
@@ -16,6 +19,7 @@ import {
   listProviders,
   patchAppSettings,
   resetAppSetting,
+  saveApiToken,
   saveYoutubeCookies,
   testFallbackChain,
   testGemini,
@@ -548,6 +552,10 @@ export default function SettingsPage() {
   const [entries, setEntries] = useState<AppSetting[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [baseInput, setBaseInput] = useState(apiBase);
+  // Read the token after mount: localStorage is unavailable during the
+  // server render and would cause a hydration mismatch in the password
+  // input.
+  const [tokenInput, setTokenInput] = useState("");
   const [testing, setTesting] = useState(false);
 
   const [draft, setDraft] = useState<Record<string, number | string>>({});
@@ -562,6 +570,8 @@ export default function SettingsPage() {
   const [apiKeyVersion, setApiKeyVersion] = useState(0);
   const [category, setCategory] = useState<SettingsCategoryId>("general");
   const [geminiTab, setGeminiTab] = useState<GeminiTabId>("overview");
+  const [socialDevOpen, setSocialDevOpen] = useState(false);
+  const [socialDevGroups, setSocialDevGroups] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState("");
   const [hitsOpen, setHitsOpen] = useState(false);
 
@@ -587,6 +597,10 @@ export default function SettingsPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    setTokenInput(apiToken());
+  }, []);
 
   useEffect(() => {
     load(apiBase);
@@ -790,10 +804,17 @@ export default function SettingsPage() {
     const v = baseInput.trim().replace(/\/+$/, "");
     if (!v) return;
     setTesting(true);
+    // Persist first: apiFetch reads the token from localStorage, so the
+    // connection test below uses the new value.
+    saveApiToken(tokenInput);
     try {
       const h = await checkHealth(v);
       if (!h.api) throw new Error("API tidak merespons di alamat itu");
+      // /health/live is always open. A gated endpoint proves the token
+      // (when the server requires one) before we declare success.
+      await getServerConfig(v);
       setApiBase(v);
+      await load(v);
       push("Endpoint API disimpan & terhubung", "success");
     } catch (err) {
       push(err instanceof Error ? err.message : "Koneksi gagal", "error");
@@ -902,42 +923,52 @@ export default function SettingsPage() {
         />
 
         <div className="settings-content">
+          {/* Keep the connection card reachable while the rest of the page
+              is still loading — including when a public API is rejecting
+              requests until the token below is filled in. */}
+          {(!entries || category === "general") && (
+            <section className="card" aria-label="Koneksi API">
+              <div className="card-head">
+                <h2>Koneksi API</h2>
+                <p>Endpoint backend dan token akses yang dipakai semua halaman.</p>
+              </div>
+              <form onSubmit={saveBase} className="form">
+                <div className="field">
+                  <label htmlFor="api-base">API base URL</label>
+                  <input id="api-base" type="url" required value={baseInput} onChange={(e) => setBaseInput(e.target.value)} placeholder="http://127.0.0.1:8000" />
+                </div>
+                <div className="field">
+                  <label htmlFor="api-token">API access token</label>
+                  <input id="api-token" type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} placeholder="Kosongkan untuk API lokal" autoComplete="off" />
+                  <small className="muted">Diperlukan bila server memakai <code>API_AUTH_TOKEN</code> (mode publik / Cloudflare Tunnel).</small>
+                </div>
+                <button type="submit" className="btn btn-filled btn-sm" disabled={testing}>
+                  {testing ? "Menguji…" : "Simpan & uji koneksi"}
+                </button>
+              </form>
+              <ul className="kv">
+                <li>
+                  <span>API</span>
+                  <span className={`dot dot-${health ? (health.api ? "ok" : "err") : "idle"}`}>
+                    {health ? (health.api ? "Terhubung" : "Terputus") : "…"}
+                  </span>
+                </li>
+                <li>
+                  <span>Worker</span>
+                  <span className={`dot dot-${health ? (health.worker ? "ok" : "err") : "idle"}`}>
+                    {health ? (health.worker ? "Siap" : "Bermasalah") : "…"}
+                  </span>
+                </li>
+              </ul>
+            </section>
+          )}
+
           {loading || !entries ? (
             <p className="muted">Memuat…</p>
           ) : (
             <>
               {category === "general" && (
                 <>
-                  <section className="card" aria-label="Koneksi API">
-          <div className="card-head">
-            <h2>Koneksi API</h2>
-            <p>Endpoint backend yang dipakai semua halaman.</p>
-          </div>
-          <form onSubmit={saveBase} className="form">
-            <div className="field">
-              <label htmlFor="api-base">API base URL</label>
-              <input id="api-base" type="url" required value={baseInput} onChange={(e) => setBaseInput(e.target.value)} placeholder="http://127.0.0.1:8000" />
-            </div>
-            <button type="submit" className="btn btn-filled btn-sm" disabled={testing}>
-              {testing ? "Menguji…" : "Simpan & uji koneksi"}
-            </button>
-          </form>
-          <ul className="kv">
-            <li>
-              <span>API</span>
-              <span className={`dot dot-${health ? (health.api ? "ok" : "err") : "idle"}`}>
-                {health ? (health.api ? "Terhubung" : "Terputus") : "…"}
-              </span>
-            </li>
-            <li>
-              <span>Worker</span>
-              <span className={`dot dot-${health ? (health.worker ? "ok" : "err") : "idle"}`}>
-                {health ? (health.worker ? "Siap" : "Bermasalah") : "…"}
-              </span>
-            </li>
-          </ul>
-        </section>
-
         <section className="card" aria-label="Preferensi">
           <div className="card-head">
             <h2>Preferensi</h2>
@@ -1166,6 +1197,116 @@ export default function SettingsPage() {
 
             {(category === "transcript" || category === "advanced") && (
               <YoutubeCookiesCard apiBase={apiBase} push={push} />
+            )}
+
+            {category === "social" && (
+              <>
+                <section className="card" aria-label="Social Accounts">
+                  <div className="card-head">
+                    <h2>Social Accounts</h2>
+                    <p>Connect your accounts and publish clips directly from GAEClip.</p>
+                  </div>
+                  <SocialAccountsSection
+                    apiBase={apiBase}
+                    push={push}
+                    onNeedConfig={(provider) => {
+                      const group = provider;
+                      setSocialDevOpen(true);
+                      setSocialDevGroups((m) => ({ ...m, [group]: true }));
+                      requestAnimationFrame(() => {
+                        document.getElementById("social-dev")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      });
+                    }}
+                  />
+                </section>
+                <Collapsible
+                  title="Developer Configuration"
+                  subtitle="OAuth credentials for YouTube, TikTok, Instagram and Facebook"
+                  open={socialDevOpen}
+                  onOpenChange={setSocialDevOpen}
+                >
+                  <div id="social-dev">
+                    <p className="muted">
+                      Hanya diperlukan bila memakai OAuth credentials kustom. User biasa cukup hubungkan akun di atas.
+                    </p>
+                    {(
+                      [
+                        { id: "youtube", label: "YouTube", idKeys: ["SOCIAL_YOUTUBE_CLIENT_ID"], secretKeys: ["SOCIAL_YOUTUBE_CLIENT_SECRET"] },
+                        { id: "tiktok", label: "TikTok", idKeys: ["SOCIAL_TIKTOK_CLIENT_KEY"], secretKeys: ["SOCIAL_TIKTOK_CLIENT_SECRET"] },
+                        { id: "facebook", label: "Facebook (Meta App)", idKeys: ["SOCIAL_META_APP_ID"], secretKeys: ["SOCIAL_META_APP_SECRET"] },
+                        { id: "instagram", label: "Instagram (Instagram App)", idKeys: ["SOCIAL_INSTAGRAM_APP_ID"], secretKeys: ["SOCIAL_INSTAGRAM_APP_SECRET"] },
+                      ] as { id: string; label: string; idKeys: string[]; secretKeys: string[] }[]
+                    ).map((group) => (
+                      <Collapsible
+                        key={group.id}
+                        title={group.label}
+                        subtitle={group.id === "facebook" ? "Meta App ID/Secret untuk Facebook Login" : group.id === "instagram" ? "Instagram App ID/Secret untuk Instagram Login (Business Login)" : undefined}
+                        open={!!socialDevGroups[group.id]}
+                        onOpenChange={(next) => setSocialDevGroups((m) => ({ ...m, [group.id]: next }))}
+                      >
+                        <GenericFields
+                          fields={(fieldsByBackend["Social Publishing"] ?? []).filter((f) =>
+                            group.idKeys.includes(f.key),
+                          )}
+                          effectiveValue={effectiveValue}
+                          renderField={renderField}
+                          fieldErrors={fieldErrors}
+                          onResetKey={setResetKey}
+                        />
+                        {group.secretKeys.map(
+                          (key) =>
+                            byKey[key] && (
+                              <SecretField key={key} apiBase={apiBase} entry={byKey[key]} push={push} onChanged={setEntries} />
+                            ),
+                        )}
+                        <p className="muted">
+                          <small>
+                            Help:{" "}
+                            <a
+                               href={
+                                 group.id === "youtube"
+                                   ? "https://console.cloud.google.com/apis/credentials"
+                                   : group.id === "tiktok"
+                                     ? "https://developers.tiktok.com/"
+                                     : group.id === "instagram"
+                                       ? "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login"
+                                       : "https://developers.facebook.com/apps/"
+                               }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              How to get {group.label} OAuth credentials ↗
+                            </a>
+                          </small>
+                        </p>
+                      </Collapsible>
+                    ))}
+                  </div>
+                </Collapsible>
+                <Collapsible title="Advanced OAuth Settings" subtitle="Callback host & port — rarely needed">
+                  <GenericFields
+                    fields={(fieldsByBackend["Social Publishing"] ?? []).filter((f) =>
+                      ["SOCIAL_OAUTH_HOST", "SOCIAL_OAUTH_PORT"].includes(f.key),
+                    )}
+                    effectiveValue={effectiveValue}
+                    renderField={renderField}
+                    fieldErrors={fieldErrors}
+                    onResetKey={setResetKey}
+                  />
+                  <p className="muted">
+                    <small>
+                      Port 0 otomatis memilih port lokal yang tersedia. Untuk Docker, baca dokumentasi deployment sebelum
+                      mengubah nilai ini.
+                    </small>
+                  </p>
+                  <details>
+                    <summary>Environment variable</summary>
+                    <p className="muted mono-sm">
+                      <small>SOCIAL_OAUTH_HOST · SOCIAL_OAUTH_PORT</small>
+                    </p>
+                  </details>
+                </Collapsible>
+              </>
             )}
 
             {category === "advanced" && (

@@ -23,6 +23,10 @@ export interface JobClip {
   duration_seconds?: number | null;
   size_bytes?: number | null;
   download_url: string;
+  description?: string | null;
+  hashtags?: string[] | null;
+  metadata_source?: string | null;
+  metadata_updated_at?: number | null;
 }
 
 export interface ClipTask {
@@ -104,6 +108,7 @@ export interface Job {
   burn_subtitles?: boolean;
   subtitle_style?: SubtitleStyle;
   subtitle_position?: SubtitlePosition;
+  subtitle_max_words_per_line?: number;
   curation?: JobCuration | null;
   error?: JobError | null;
   clips?: JobClip[];
@@ -137,6 +142,7 @@ export interface JobSearchResult {
 export interface ChannelInfo {
   name: string;
   jobs: number;
+  avatar_url?: string | null;
 }
 
 export type SubtitleStyle = "bold_pop" | "dynamic_highlight" | "casual_center" | "elegant_serif";
@@ -164,6 +170,19 @@ export interface CreateJobInput {
   burn_subtitles: boolean;
   subtitle_style: SubtitleStyle;
   subtitle_position: SubtitlePosition;
+  subtitle_max_words_per_line: number;
+  brand_enabled: boolean;
+  brand_template: string;
+  brand_channel_name: string;
+  brand_avatar_asset: string;
+  brand_display_mode: string;
+  brand_position: string;
+  brand_timing: string;
+  brand_duration: number;
+  brand_blur: number;
+  brand_dim: number;
+  brand_animation: string;
+  brand_additional_text: string;
 }
 
 export interface ServerConfig {

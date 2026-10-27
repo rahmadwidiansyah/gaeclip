@@ -8,8 +8,10 @@
 
 import {
   ArrowUpDown,
+  BadgeCheck,
   BriefcaseBusiness,
   Calendar,
+  Camera,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -20,6 +22,7 @@ import {
   Clock,
   Copy,
   Download,
+  Eye,
   Image,
   Info,
   LayoutDashboard,
@@ -29,6 +32,8 @@ import {
   LoaderCircle,
   Monitor,
   Moon,
+  Music2,
+  Palette,
   Pencil,
   Play,
   Plus,
@@ -37,8 +42,11 @@ import {
   Settings,
   Star,
   Sun,
+  ThumbsUp,
   Trash2,
   TriangleAlert,
+  Type,
+  Upload,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -75,6 +83,17 @@ export const ICONS = {
   copy: Copy,
   star: Star,
   info: Info,
+  upload: Upload,
+  badge: BadgeCheck,
+  palette: Palette,
+  type: Type,
+  eye: Eye,
+  /* Platform glyphs: generic Lucide metaphors (brand icons were removed
+     upstream), always paired with the platform name text — never a fake logo. */
+  youtube: Play,
+  tiktok: Music2,
+  instagram: Camera,
+  facebook: ThumbsUp,
   circle: Circle,
   loader: LoaderCircle,
 } satisfies Record<string, LucideIcon>;

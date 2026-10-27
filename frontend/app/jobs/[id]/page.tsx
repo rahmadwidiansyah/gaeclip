@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { WorkflowGraph, taskState } from "../../components/graph";
 import { Collapsible, ConfirmDialog, EmptyState, Icon, PageHeader, ProgressBar, StatusChip } from "../../components/ui";
 import { cancelJob, clipUrl, deleteJob, formatBytes, formatClock, formatDuration, formatPublished, formatTime, getWorkerStatus, recreateJob, recreatePreview, refreshJobMetadata } from "../../lib/api";
+import { ClipPublishZone } from "../publish-dialog";
 import type { RecreatePreview, WorkerStatus } from "../../lib/api";
 import { useJob } from "../../lib/hooks";
 import { useSettings, useToast } from "../../lib/store";
@@ -279,17 +280,15 @@ export default function JobDetailPage() {
         )}
       </section>
 
-      {/* ── 2. Generated clips — fokus utama ── */}
-      <section className="card clips-card" aria-label="Generated clips">
-        <div className="card-head row">
-          <div>
-            <h2>Generated Clips <span className="muted">· {clipCount}</span></h2>
-            <p>Potongan audio &amp; subtitle.</p>
-          </div>
-          {curationBadge && (
-            <span className="chip chip-muted" title={curationTip ?? undefined}>{curationBadge}</span>
-          )}
-        </div>
+      {/* ── 2. Generated clips — result gallery (collapsible) ── */}
+      <Collapsible
+        title={`Generated Clips · ${clipCount}`}
+        subtitle="Potongan audio & subtitle."
+        badge={curationBadge ? (
+          <span className="chip chip-muted" title={curationTip ?? undefined}>{curationBadge}</span>
+        ) : undefined}
+        defaultOpen={terminal || clipCount > 0}
+      >
         {!job.clips || job.clips.length === 0 ? (
           <p className="muted">{terminal ? "Tidak ada clip yang berhasil." : "Clip akan muncul saat render selesai."}</p>
         ) : (
@@ -310,7 +309,7 @@ export default function JobDetailPage() {
                     {clock && <span className="clip-dur" aria-label={`Durasi ${clock}`}>{clock}</span>}
                   </div>
                   <div className="clip-body">
-                    <strong className="clip-title" title={clip.title || clip.clip_id}>
+                    <strong className="clip-title-2" title={clip.title || clip.clip_id}>
                       {String(i + 1).padStart(2, "0")} · {clip.title || clip.clip_id}
                     </strong>
                     <p className="clip-meta muted">
@@ -319,16 +318,27 @@ export default function JobDetailPage() {
                         <span className="clip-score"> · <Icon name="star" size={11} /> {clip.score.toFixed(2)}</span>
                       )}
                     </p>
-                    <a className="btn btn-tonal btn-sm clip-dl" href={clipUrl(apiBase, clip.download_url)} download>
-                      <Icon name="download" size={14} /> Unduh
-                    </a>
+                    <ClipPublishZone
+                      apiBase={apiBase}
+                      jobId={job.job_id}
+                      clipId={clip.clip_id}
+                      clipTitle={clip.title || clip.clip_id}
+                      clipDescription={clip.description || ""}
+                      clipHashtags={clip.hashtags || []}
+                      clipMetadataSource={clip.metadata_source || null}
+                      push={push}
+                    >
+                      <a className="btn btn-tonal btn-sm" href={clipUrl(apiBase, clip.download_url)} download>
+                        <Icon name="download" size={14} /> Unduh
+                      </a>
+                    </ClipPublishZone>
                   </div>
                 </article>
               );
             })}
           </div>
         )}
-      </section>
+      </Collapsible>
 
       {/* ── 3. Processing details (collapsed by default saat selesai) ── */}
       <Collapsible
@@ -355,7 +365,7 @@ export default function JobDetailPage() {
             <span>
               {job.burn_subtitles === false
                 ? "Tidak dibakar"
-                : `Dibakar · ${job.subtitle_style ?? "casual_center"} · ${job.subtitle_position ?? "bottom_center"}`}
+                : `Dibakar · ${job.subtitle_style ?? "casual_center"} · ${job.subtitle_position ?? "bottom_center"} · ${job.subtitle_max_words_per_line ?? 3} kata/baris`}
             </span>
           </li>
           <li>

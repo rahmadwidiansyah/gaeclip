@@ -19,6 +19,9 @@ class VideoSource:
     url: str
     title: str | None = None
     channel_name: str | None = None
+    channel_id: str | None = None
+    channel_url: str | None = None
+    channel_avatar_url: str | None = None
     thumbnail_url: str | None = None
     published_at: str | None = None
     duration: float | None = None
@@ -35,6 +38,9 @@ class VideoSource:
             "url": self.url,
             "title": self.title,
             "channel_name": self.channel_name,
+            "channel_id": self.channel_id,
+            "channel_url": self.channel_url,
+            "channel_avatar_url": self.channel_avatar_url,
             "thumbnail_url": self.thumbnail_url,
             "published_at": self.published_at,
             "duration": self.duration,
@@ -75,11 +81,16 @@ def build_snapshot(video_id: str, url: str, metadata: dict[str, Any]) -> dict[st
     except (TypeError, ValueError):
         duration = None
     title = metadata.get("title") or metadata.get("fulltitle")
+    channel_id = metadata.get("channel_id") or metadata.get("uploader_id")
+    channel_url = metadata.get("channel_url") or metadata.get("uploader_url")
     return {
         "youtube_video_id": video_id,
         "url": url,
         "title": title if isinstance(title, str) and title.strip() else None,
         "channel_name": metadata.get("channel") or metadata.get("uploader"),
+        "channel_id": str(channel_id) if channel_id else None,
+        "channel_url": str(channel_url) if channel_url else None,
+        "channel_avatar_url": None,
         "thumbnail_url": _pick_thumbnail(metadata),
         "published_at": _published_at(metadata),
         "duration": duration,
@@ -107,7 +118,12 @@ class VideoStore:
             return None
         try:
             data = json.loads(raw)
-            return VideoSource(**data)
+            if not isinstance(data, dict):
+                return None
+            # Tolerant of records written before channel_* fields existed.
+            known = {field.name for field in VideoSource.__dataclass_fields__.values()}
+            filtered = {key: value for key, value in data.items() if key in known}
+            return VideoSource(**filtered)
         except (json.JSONDecodeError, TypeError):
             return None
 
@@ -121,6 +137,9 @@ class VideoStore:
             url=url,
             title=snapshot["title"],
             channel_name=snapshot["channel_name"],
+            channel_id=snapshot.get("channel_id"),
+            channel_url=snapshot.get("channel_url"),
+            channel_avatar_url=snapshot.get("channel_avatar_url"),
             thumbnail_url=snapshot["thumbnail_url"],
             published_at=snapshot["published_at"],
             duration=snapshot["duration"],

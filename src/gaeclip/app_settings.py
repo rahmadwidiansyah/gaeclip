@@ -34,7 +34,12 @@ from .errors import ConfigurationError, ValidationError
 logger = logging.getLogger(__name__)
 
 # Keys allowed to hold an explicit empty value (unset preference).
-EMPTY_OK_KEYS = frozenset({"AI_PRIMARY_MODEL", "AI_FALLBACK_MODELS"})
+EMPTY_OK_KEYS = frozenset({"AI_PRIMARY_MODEL", "AI_FALLBACK_MODELS",
+                           "SOCIAL_YOUTUBE_CLIENT_ID", "SOCIAL_YOUTUBE_CLIENT_SECRET",
+                            "SOCIAL_TIKTOK_CLIENT_KEY", "SOCIAL_TIKTOK_CLIENT_SECRET",
+                            "SOCIAL_META_APP_ID", "SOCIAL_META_APP_SECRET",
+                            "SOCIAL_INSTAGRAM_APP_ID", "SOCIAL_INSTAGRAM_APP_SECRET",
+                            "SOCIAL_PUBLIC_MEDIA_BASE_URL"})
 
 SETTINGS_HASH = "gaeclip:settings"
 SETTINGS_META_HASH = "gaeclip:settings:meta"
@@ -197,6 +202,41 @@ SETTINGS: tuple[SettingDef, ...] = (
                "LOG_LEVEL", "Tingkat detail log aplikasi.",
                "INFO", None, ("DEBUG", "INFO", "WARNING", "ERROR"),
                None, None, False, "Berlaku untuk job baru; log API mengikuti setelah restart."),
+    # -- Social Publishing (OAuth client registrations; secrets encrypted) --
+    SettingDef("SOCIAL_YOUTUBE_CLIENT_ID", "string", "Social Publishing", "YouTube OAuth Client ID",
+               "SOCIAL_YOUTUBE_CLIENT_ID", "Client ID aplikasi Desktop dari Google Cloud Console. Kosong = YouTube connect nonaktif.",
+               "", None, None, None, None, False, "Berlaku untuk koneksi baru."),
+    SettingDef("SOCIAL_YOUTUBE_CLIENT_SECRET", "secret", "Social Publishing", "YouTube OAuth Client Secret",
+               "SOCIAL_YOUTUBE_CLIENT_SECRET", "Opsional untuk tipe Desktop app. Tidak pernah ditampilkan kembali.",
+               "", None, None, None, None, False, "Berlaku untuk koneksi baru."),
+    SettingDef("SOCIAL_TIKTOK_CLIENT_KEY", "string", "Social Publishing", "TikTok Client Key",
+               "SOCIAL_TIKTOK_CLIENT_KEY", "Client Key dari TikTok developer portal. Kosong = TikTok connect nonaktif.",
+               "", None, None, None, None, False, "Berlaku untuk koneksi baru."),
+    SettingDef("SOCIAL_TIKTOK_CLIENT_SECRET", "secret", "Social Publishing", "TikTok Client Secret",
+               "SOCIAL_TIKTOK_CLIENT_SECRET", "Client Secret TikTok. Tidak pernah ditampilkan kembali.",
+               "", None, None, None, None, False, "Berlaku untuk koneksi baru."),
+    SettingDef("SOCIAL_META_APP_ID", "string", "Social Publishing", "Meta App ID",
+               "SOCIAL_META_APP_ID", "App ID Meta untuk Facebook Login (Facebook publishing). Kosong = Facebook connect nonaktif.",
+               "", None, None, None, None, False, "Berlaku untuk koneksi baru."),
+    SettingDef("SOCIAL_META_APP_SECRET", "secret", "Social Publishing", "Meta App Secret",
+               "SOCIAL_META_APP_SECRET", "App Secret Meta (Facebook). Tidak pernah ditampilkan kembali.",
+               "", None, None, None, None, False, "Berlaku untuk koneksi baru."),
+    SettingDef("SOCIAL_INSTAGRAM_APP_ID", "string", "Social Publishing", "Instagram App ID",
+               "SOCIAL_INSTAGRAM_APP_ID", "Instagram App ID (App Dashboard > Instagram > API setup with Instagram login). Kosong = Instagram connect nonaktif.",
+               "", None, None, None, None, False, "Berlaku untuk koneksi baru."),
+    SettingDef("SOCIAL_INSTAGRAM_APP_SECRET", "secret", "Social Publishing", "Instagram App Secret",
+               "SOCIAL_INSTAGRAM_APP_SECRET", "Instagram App Secret (Business Login). Tidak pernah ditampilkan kembali.",
+               "", None, None, None, None, False, "Berlaku untuk koneksi baru."),
+    SettingDef("SOCIAL_PUBLIC_MEDIA_BASE_URL", "string", "Social Publishing", "Public Media Base URL",
+               "SOCIAL_PUBLIC_MEDIA_BASE_URL", "Basis URL https publik untuk file clip (mis. domain Cloudflare Tunnel). Dipakai sebagai video_url Instagram. Kosong = nonaktif.",
+               "", None, None, None, None, False, "Berlaku untuk publish berikutnya."),
+    SettingDef("SOCIAL_OAUTH_HOST", "string", "Social Publishing", "OAuth Callback Host",
+               "SOCIAL_OAUTH_HOST", "Interface listener callback OAuth. 127.0.0.1 untuk desktop. "
+               "Docker satu mesin dengan browser: 0.0.0.0 + publish 127.0.0.1:PORT:PORT (host tetap loopback).",
+               "127.0.0.1", None, None, None, None, False, "Berlaku untuk koneksi baru."),
+    SettingDef("SOCIAL_OAUTH_PORT", "integer", "Social Publishing", "OAuth Callback Port",
+               "SOCIAL_OAUTH_PORT", "0 = port acak tiap sesi (disarankan). Isi port tetap bila perlu publish port Docker.",
+               "0", None, None, 0, 65535, False, "Berlaku untuk koneksi baru."),
 )
 
 DEFS: dict[str, SettingDef] = {item.key: item for item in SETTINGS}
@@ -205,6 +245,7 @@ INFRASTRUCTURE_KEYS = frozenset({
     "REDIS_URL", "STORAGE_ROOT", "API_HOST", "API_PORT",
     "NEXT_PUBLIC_API_BASE_URL", "FRONTEND_ORIGINS", "FRONTEND_ORIGIN",
     "FRONTEND_HOST", "FRONTEND_PORT", "PUBLIC_MODE", "SETTINGS_SECRET",
+    "API_AUTH_TOKEN",
 })
 
 

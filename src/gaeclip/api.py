@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -20,11 +21,52 @@ from .videos import VideoStore
 
 try:
     from fastapi import Response as FastAPIResponse
+    from fastapi import UploadFile as FastAPIUploadFile
 except ImportError:
     FastAPIResponse = Any
+    FastAPIUploadFile = Any
 
 
 MAX_CLIPS_HARD_LIMIT = 10
+
+
+class _PrivateNetworkAccessMiddleware:
+    """Chromium Private Network Access opt-in (tunneled dev only).
+
+    Added outermost (after CORSMiddleware) so it also covers CORS
+    preflight responses, which CORSMiddleware short-circuits. The
+    `Access-Control-Allow-Private-Network: true` header is emitted only
+    when BOTH hold: the request sends
+    `Access-Control-Request-Private-Network: true`, and its Origin is in
+    the CORS allowlist. No new dependencies (pure ASGI).
+    """
+
+    def __init__(self, app: Any, allowed_origins: list[str] | None = None):
+        self.app = app
+        self.allowed = set(allowed_origins or [])
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = {
+            key.decode("latin-1").lower(): value.decode("latin-1")
+            for key, value in scope.get("headers", [])
+        }
+        wants_pna = (headers.get("access-control-request-private-network")
+                     == "true")
+        if not wants_pna or headers.get("origin", "") not in self.allowed:
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_pna(message: Any) -> None:
+            if message.get("type") == "http.response.start":
+                raw = list(message.get("headers", [])) + [
+                    (b"access-control-allow-private-network", b"true")]
+                message = {**message, "headers": raw}
+            await send(message)
+
+        await self.app(scope, receive, send_with_pna)
 
 
 class CreateJobRequest(BaseModel):
@@ -36,6 +78,19 @@ class CreateJobRequest(BaseModel):
     burn_subtitles: bool = True
     subtitle_style: Literal["bold_pop", "dynamic_highlight", "casual_center", "elegant_serif"] = "casual_center"
     subtitle_position: Literal["center", "bottom_center", "bottom"] = "bottom_center"
+    subtitle_max_words_per_line: int | None = Field(default=None, ge=1, le=8)
+    brand_enabled: bool = False
+    brand_template: Literal["glass_end", "minimal_corner", "creator_tag", "creator_outro"] = "glass_end"
+    brand_channel_name: str | None = Field(default=None, max_length=60)
+    brand_avatar_asset: str | None = Field(default=None, max_length=128)
+    brand_display_mode: Literal["avatar_name", "avatar_only", "name_only"] = "avatar_name"
+    brand_position: Literal["top_left", "top_right", "bottom_left", "bottom_right", "top_center", "center"] = "top_left"
+    brand_timing: Literal["full", "first", "last"] = "last"
+    brand_duration: float | None = Field(default=None, ge=0.5, le=10)
+    brand_blur: float | None = Field(default=None, ge=0, le=50)
+    brand_dim: float | None = Field(default=None, ge=0, le=0.8)
+    brand_animation: Literal["none", "fade", "fade_scale"] = "fade"
+    brand_additional_text: str | None = Field(default=None, max_length=40)
 
 
 class RecreateJobRequest(BaseModel):
@@ -52,6 +107,19 @@ class SettingValue(BaseModel):
 
 class GeminiTestRequest(BaseModel):
     api_key: str | None = None
+
+
+class ApiBrandAvatarUrl(BaseModel):
+    """Module scope: FastAPI cannot resolve function-local body models."""
+
+    url: str = Field(default="", max_length=2048)
+    channel_name: str | None = Field(default=None, max_length=60)
+
+
+class ApiBrandResolveUrl(BaseModel):
+    """Module scope: FastAPI cannot resolve function-local body models."""
+
+    url: str = Field(default="", max_length=2048)
 
 
 class ProviderModelBody(BaseModel):
@@ -136,6 +204,12 @@ def create_app():
     # Exposed for graceful shutdown/tests that must release the store
     # (Windows cannot delete an open SQLite file).
     app.state.store_client = client
+    # Auth is inside CORS (added first): 401 responses still carry the
+    # CORS headers the browser needs to read the error instead of an
+    # opaque "Failed to fetch".
+    from .api_auth import ApiTokenMiddleware
+
+    app.add_middleware(ApiTokenMiddleware, token=settings.api_auth_token)
     from fastapi.middleware.cors import CORSMiddleware
     allowed_origins = [
         origin.strip()
@@ -149,8 +223,17 @@ def create_app():
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Idempotency-Key"],
+        allow_headers=["Content-Type", "Idempotency-Key", "Authorization", "X-API-Key"],
     )
+    # Private Network Access opt-in for tunneled dev (e.g. ngrok HTTPS
+    # frontend -> loopback backend). Chromium treats that as a
+    # public->private request and blocks it unless the server answers
+    # `Access-Control-Allow-Private-Network: true`. Strictly scoped: the
+    # header is added ONLY when the request carries the PNA preflight
+    # marker AND its Origin is already in the CORS allowlist. Everything
+    # else passes through untouched.
+    app.add_middleware(_PrivateNetworkAccessMiddleware,
+                       allowed_origins=allowed_origins)
 
     def public_job(record: JobRecord) -> dict:
         payload = record.to_dict()
@@ -287,6 +370,7 @@ def create_app():
         keys = sorted((payload.settings or {}).keys())
         started = time.monotonic()
         logger.info("settings_update_started: keys=%s", keys)
+        from .audit import write_event
         try:
             updated = AppSettings(client).set_many(payload.settings or {})
         except ValidationError as exc:
@@ -298,6 +382,12 @@ def create_app():
         logger.info(
             "settings_update_success: keys=%s duration_ms=%d",
             sorted(updated), int((time.monotonic() - started) * 1000),
+        )
+        write_event(
+            storage_root=settings.storage_root,
+            action="settings.updated",
+            actor="api",
+            details={"keys": sorted(updated)},
         )
         return {"updated": sorted(updated), "settings": AppSettings(client).as_dict()}
 
@@ -311,6 +401,13 @@ def create_app():
         except ConfigurationError as exc:
             raise HTTPException(status_code=500, detail={"code": exc.code, "message": str(exc)}) from exc
         logger.info("settings_update_success: keys=%s", [key])
+        from .audit import write_event
+        write_event(
+            storage_root=settings.storage_root,
+            action="settings.updated",
+            actor="api",
+            details={"key": key},
+        )
         return {"updated": [key], "settings": AppSettings(client).as_dict()}
 
     @app.delete("/api/v1/settings/{key}")
@@ -323,6 +420,13 @@ def create_app():
         except ConfigurationError as exc:
             raise HTTPException(status_code=500, detail={"code": exc.code, "message": str(exc)}) from exc
         logger.info("settings_update_success: keys=%s reset=True", [key])
+        from .audit import write_event
+        write_event(
+            storage_root=settings.storage_root,
+            action="settings.reset",
+            actor="api",
+            details={"key": key},
+        )
         return {"updated": [key], "settings": AppSettings(client).as_dict()}
 
     @app.post("/api/v1/settings/test/gemini")
@@ -874,12 +978,25 @@ def create_app():
             max_duration = payload.max_duration if payload.max_duration is not None else server.max_clip_duration_seconds
             if min_duration > max_duration:
                 raise ValidationError("min_duration exceeds max_duration")
+            from .subtitles import normalize_max_words_per_line
+
+            subtitle_max_words = normalize_max_words_per_line(
+                payload.subtitle_max_words_per_line)
             fingerprint = repository.request_fingerprint(
                 source_url, payload.language,
                 max_clips, min_duration, max_duration,
                 payload.burn_subtitles,
                 payload.subtitle_style, payload.subtitle_position,
+                subtitle_max_words,
                 getattr(server, "transcript_source", "youtube_first"),
+                payload.brand_enabled, payload.brand_template,
+                payload.brand_channel_name, payload.brand_avatar_asset,
+                payload.brand_display_mode, payload.brand_position,
+                payload.brand_timing,
+                payload.brand_duration if payload.brand_duration is not None else 2.0,
+                payload.brand_blur if payload.brand_blur is not None else 20.0,
+                payload.brand_dim if payload.brand_dim is not None else 0.35,
+                payload.brand_animation, payload.brand_additional_text,
             )
             video_id = extract_video_id(source_url)
             video_snapshot = None
@@ -898,12 +1015,33 @@ def create_app():
                 burn_subtitles=payload.burn_subtitles,
                 subtitle_style=payload.subtitle_style,
                 subtitle_position=payload.subtitle_position,
+                subtitle_max_words_per_line=subtitle_max_words,
+                brand_enabled=payload.brand_enabled,
+                brand_template=payload.brand_template,
+                brand_channel_name=(payload.brand_channel_name or "").strip() or None,
+                brand_avatar_asset=(payload.brand_avatar_asset or "").strip() or None,
+                brand_display_mode=payload.brand_display_mode,
+                brand_position=payload.brand_position,
+                brand_timing=payload.brand_timing,
+                brand_duration=payload.brand_duration if payload.brand_duration is not None else 2.0,
+                brand_blur=payload.brand_blur if payload.brand_blur is not None else 20.0,
+                brand_dim=payload.brand_dim if payload.brand_dim is not None else 0.35,
+                brand_animation=payload.brand_animation,
+                brand_additional_text=(payload.brand_additional_text or "").strip() or None,
                 video_id=video_id, video=video_snapshot,
             )
             record, existing = repository.create(record, idempotency_key, fingerprint)
             if existing:
                 response.status_code = 200
                 return public_job(record)
+            from .audit import write_event
+            write_event(
+                storage_root=settings.storage_root,
+                action="job.created",
+                actor="api",
+                job_id=record.job_id,
+                details={"source_url": record.source_url},
+            )
             try:
                 if is_desktop():
                     # Local runner: same submit contract (job_id -> task id),
@@ -1029,6 +1167,18 @@ def create_app():
         """Distinct channel names with job counts (from stored metadata)."""
         videos = VideoStore(client)
         counts: dict[str, int] = {}
+        avatars: dict[str, str] = {}
+
+        def _avatar_preview(value: Any) -> str | None:
+            if not value or not isinstance(value, str):
+                return None
+            value = value.strip()
+            if not value:
+                return None
+            if value.startswith("http://") or value.startswith("https://"):
+                return value
+            return f"/api/v1/brand-assets/{value}"
+
         for record in repository.list(limit=10000):
             name = (record.video or {}).get("channel_name")
             if not name and record.video_id:
@@ -1038,12 +1188,203 @@ def create_app():
             if not name:
                 continue
             counts[name] = counts.get(name, 0) + 1
+            if name not in avatars:
+                preview = _avatar_preview((record.video or {}).get("channel_avatar_url"))
+                if preview is None and record.video_id:
+                    try:
+                        cached = videos.get(record.video_id)
+                        preview = _avatar_preview(
+                            cached.to_dict().get("channel_avatar_url") if cached else None)
+                    except Exception:
+                        preview = None
+                if preview:
+                    avatars[name] = preview
         return {
             "channels": [
-                {"name": name, "jobs": count}
+                {"name": name, "jobs": count, "avatar_url": avatars.get(name)}
                 for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))
             ]
         }
+
+    # Body models are module-level (api_BrandAvatarUrl/api_BrandResolveUrl):
+    # FastAPI cannot resolve function-local models for request bodies.
+    def _brand_assets_dir() -> Path:
+        from .channel_avatar import assets_dir
+        from .config import Settings as _Settings
+
+        try:
+            root = str(Settings.resolve(client).storage_root)
+        except Exception:
+            root = "./storage"
+        return assets_dir(root)
+
+    @app.post("/api/v1/brand-assets/avatar/upload")
+    def upload_brand_avatar(file: FastAPIUploadFile):
+        """Manual avatar upload (PNG/JPEG ≤2MB). Returns asset id + preview URL."""
+        from .channel_avatar import save_uploaded_avatar
+        from .errors import ValidationError as _ValidationError
+
+        try:
+            data = file.file.read(2 * 1024 * 1024 + 1)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Tidak dapat membaca file: {exc}")
+        try:
+            asset_id = save_uploaded_avatar(data, file.filename or "", _brand_assets_dir())
+        except _ValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        return {"asset_id": asset_id, "preview_url": f"/api/v1/brand-assets/{asset_id}"}
+
+    @app.post("/api/v1/brand-assets/avatar/fetch")
+    def fetch_brand_avatar(body: ApiBrandAvatarUrl):
+        """Download an explicit avatar URL into the asset store."""
+        from .channel_avatar import fetch_remote_avatar
+        from .errors import ValidationError as _ValidationError
+
+        if not (body.url or "").strip():
+            raise HTTPException(status_code=422, detail="URL avatar kosong")
+        try:
+            asset_id = fetch_remote_avatar(body.url.strip(), _brand_assets_dir())
+        except _ValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        return {"asset_id": asset_id, "preview_url": f"/api/v1/brand-assets/{asset_id}"}
+
+    @app.post("/api/v1/brand-assets/avatar/resolve")
+    def resolve_brand_avatar(body: ApiBrandAvatarUrl):
+        """Resolve a channel name to its YouTube avatar (cached).
+
+        Looks up stored sources for a channel id/URL, fetches the channel
+        page once via yt-dlp, caches the avatar file, and stamps matching
+        VideoStore records so future picks are instant.
+        """
+        from .channel_avatar import fetch_channel_avatar
+
+        name = (body.channel_name or "").strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Nama channel kosong")
+        videos = VideoStore(client)
+        channel_id: str | None = None
+        channel_url: str | None = None
+        try:
+            for source in videos.list_all():
+                if (source.channel_name or "").strip().lower() == name.lower():
+                    channel_id = source.channel_id or channel_id
+                    channel_url = source.channel_url or channel_url
+                    if channel_id:
+                        break
+        except Exception:
+            pass
+        if not channel_id and not channel_url:
+            raise HTTPException(
+                status_code=422,
+                detail="Channel belum punya metadata (id/URL). Proses satu video channel itu dulu, atau unggah avatar manual.")
+        avatar = fetch_channel_avatar(channel_id, channel_url, _brand_assets_dir())
+        if avatar is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Avatar channel tidak ditemukan. Pastikan channel publik, atau unggah avatar manual.")
+        try:
+            for source in videos.list_all():
+                if (source.channel_name or "").strip().lower() == name.lower():
+                    record = videos.get(source.youtube_video_id)
+                    if record is not None:
+                        record.channel_avatar_url = avatar.name
+                        videos.client.set(videos._key(record.youtube_video_id),
+                                          json.dumps(record.to_dict()))
+        except Exception:
+            pass
+        return {"asset_id": avatar.name, "preview_url": f"/api/v1/brand-assets/{avatar.name}"}
+
+    @app.post("/api/v1/brand-assets/avatar/resolve-url")
+    def resolve_brand_avatar_url(body: ApiBrandResolveUrl):
+        """Resolve a YouTube video URL straight to its channel identity.
+
+        Used by Create Clip: the user pastes a URL and the form auto-fills
+        channel name + avatar without manual input. Flow:
+
+        1. VideoStore hit by video id (no network) when the video was seen.
+        2. Else one ``video_metadata`` call (no video download), result
+           upserted into VideoStore so the pipeline reuses it.
+        3. Channel avatar via the cached ``fetch_channel_avatar`` path
+           (no re-download when already cached).
+
+        Never raises 500 for provider problems: YouTube refusals, private
+        videos and missing avatars all map to 422 with a clear message, and
+        a missing avatar still returns the channel name (name-only branding
+        keeps working).
+        """
+        from .channel_avatar import fetch_channel_avatar
+        from .downloader import _sanitize_error, video_metadata
+        from .url import extract_video_id, validate_youtube_url
+
+        url = (body.url or "").strip()
+        try:
+            validate_youtube_url(url)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"URL tidak valid: {exc}")
+        video_id = extract_video_id(url) or ""
+        videos = VideoStore(client)
+        channel_name: str | None = None
+        channel_id: str | None = None
+        channel_url: str | None = None
+        if video_id:
+            try:
+                cached = videos.get(video_id)
+                if cached is not None and (cached.channel_name or "").strip():
+                    channel_name = cached.channel_name
+                    channel_id = cached.channel_id
+                    channel_url = cached.channel_url
+            except Exception:
+                pass
+        if not (channel_name or "").strip():
+            try:
+                meta = video_metadata(url)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Tidak dapat membaca metadata video: {_sanitize_error(str(exc))}")
+            if not isinstance(meta, dict):
+                raise HTTPException(status_code=422, detail="Metadata video tidak valid")
+            channel_name = str(meta.get("channel") or meta.get("uploader") or "").strip() or None
+            channel_id = str(meta.get("channel_id") or meta.get("uploader_id") or "") or None
+            channel_url = str(meta.get("channel_url") or meta.get("uploader_url") or "") or None
+            if video_id:
+                try:
+                    videos.upsert(video_id, url, meta)
+                except Exception:
+                    pass
+        if not (channel_name or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Nama channel tidak ditemukan di metadata video. Isi manual di opsi lanjutan.")
+        avatar = fetch_channel_avatar(channel_id, channel_url, _brand_assets_dir())
+        if avatar is None:
+            return {"channel_name": channel_name, "channel_id": channel_id,
+                    "asset_id": None, "preview_url": None}
+        try:
+            for source in videos.list_all():
+                if (source.channel_name or "").strip().lower() == channel_name.lower():
+                    record = videos.get(source.youtube_video_id)
+                    if record is not None:
+                        record.channel_avatar_url = avatar.name
+                        videos.client.set(videos._key(record.youtube_video_id),
+                                          json.dumps(record.to_dict()))
+        except Exception:
+            pass
+        return {"channel_name": channel_name, "channel_id": channel_id,
+                "asset_id": avatar.name,
+                "preview_url": f"/api/v1/brand-assets/{avatar.name}"}
+
+    @app.get("/api/v1/brand-assets/{asset_id}")
+    def serve_brand_asset(asset_id: str):
+        """Serve a stored brand avatar (traversal-proof)."""
+        from .channel_avatar import resolve_asset_path
+
+        path = resolve_asset_path(asset_id, _brand_assets_dir())
+        if path is None:
+            raise HTTPException(status_code=404, detail="Asset tidak ditemukan")
+        suffix = path.suffix.lower()
+        media_type = "image/png" if suffix == ".png" else "image/jpeg"
+        return FileResponse(path, media_type=media_type)
 
     @app.get("/api/v1/videos")
     def list_videos():
@@ -1134,6 +1475,13 @@ def create_app():
         except Exception:
             pass
         repository.transition(job_id, "cancelled", "cancelled", record.progress)
+        from .audit import write_event
+        write_event(
+            storage_root=settings.storage_root,
+            action="job.cancelled",
+            actor="api",
+            job_id=job_id,
+        )
         return public_job(repository.get(job_id))
 
     @app.get("/api/v1/jobs/{job_id}/recreate-preview")
@@ -1199,12 +1547,29 @@ def create_app():
                 )
                 return public_job(candidate)
         server = Settings.resolve(client)
+        from .subtitles import normalize_max_words_per_line
+
+        parent_max_words = normalize_max_words_per_line(
+            getattr(parent, "subtitle_max_words_per_line", 3))
         fingerprint = repository.request_fingerprint(
             parent.source_url, parent.language,
             parent.max_clips, parent.min_duration, parent.max_duration,
             parent.burn_subtitles,
             parent.subtitle_style, parent.subtitle_position,
+            parent_max_words,
             getattr(server, "transcript_source", "youtube_first"),
+            getattr(parent, "brand_enabled", False),
+            getattr(parent, "brand_template", "glass_end"),
+            getattr(parent, "brand_channel_name", None),
+            getattr(parent, "brand_avatar_asset", None),
+            getattr(parent, "brand_display_mode", "avatar_name"),
+            getattr(parent, "brand_position", "top_left"),
+            getattr(parent, "brand_timing", "last"),
+            getattr(parent, "brand_duration", 2.0) or 2.0,
+            getattr(parent, "brand_blur", 20.0),
+            getattr(parent, "brand_dim", 0.35),
+            getattr(parent, "brand_animation", "fade"),
+            getattr(parent, "brand_additional_text", None),
         )
         now = time.time()
         record = JobRecord(
@@ -1214,6 +1579,19 @@ def create_app():
             burn_subtitles=parent.burn_subtitles,
             subtitle_style=parent.subtitle_style,
             subtitle_position=parent.subtitle_position,
+            subtitle_max_words_per_line=parent_max_words,
+            brand_enabled=getattr(parent, "brand_enabled", False),
+            brand_template=getattr(parent, "brand_template", "glass_end"),
+            brand_channel_name=getattr(parent, "brand_channel_name", None),
+            brand_avatar_asset=getattr(parent, "brand_avatar_asset", None),
+            brand_display_mode=getattr(parent, "brand_display_mode", "avatar_name"),
+            brand_position=getattr(parent, "brand_position", "top_left"),
+            brand_timing=getattr(parent, "brand_timing", "last"),
+            brand_duration=getattr(parent, "brand_duration", 2.0) or 2.0,
+            brand_blur=getattr(parent, "brand_blur", 20.0),
+            brand_dim=getattr(parent, "brand_dim", 0.35),
+            brand_animation=getattr(parent, "brand_animation", "fade"),
+            brand_additional_text=getattr(parent, "brand_additional_text", None),
             video_id=parent.video_id, video=parent.video,
             recreated_from_job_id=job_id,
             force_retranscribe=force,
@@ -1346,6 +1724,7 @@ def create_app():
             raise HTTPException(status_code=404, detail="Job not found")
         if record.status not in TERMINAL_STATES:
             raise HTTPException(status_code=409, detail="Only terminal jobs can be deleted")
+        from .audit import write_event
         try:
             shutil.rmtree(settings.storage_root / "jobs" / job_id, ignore_errors=False)
         except FileNotFoundError:
@@ -1355,6 +1734,12 @@ def create_app():
             # muncul sebagai opaque "Failed to fetch".
             logger.warning("delete_job_missing_dir: job_id=%s", job_id)
         repository.delete(job_id)
+        write_event(
+            storage_root=settings.storage_root,
+            action="job.deleted",
+            actor="api",
+            job_id=job_id,
+        )
 
     @app.get("/api/v1/jobs/{job_id}/clips/{clip_id}")
     def download_clip(job_id: str, clip_id: str):
@@ -1369,5 +1754,98 @@ def create_app():
         if not path.is_relative_to(root) or not path.is_file():
             raise HTTPException(status_code=404, detail="Clip not found")
         return FileResponse(path, media_type="video/mp4", filename=f"{clip_id}.mp4")
+
+    # Structured access log: one JSON line per request to stdout. Uses
+    # BaseHTTPMiddleware so it integrates cleanly with Starlette's
+    # response pipeline (no double-start issues).
+    import logging as _logging
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    _access_logger = _logging.getLogger("gaeclip.access")
+    if not _access_logger.handlers:
+        _handler = _logging.StreamHandler()
+        _handler.setFormatter(_logging.Formatter("%(message)s"))
+        _access_logger.addHandler(_handler)
+        _access_logger.setLevel(_logging.INFO)
+
+    class _AccessLogMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            started = time.monotonic()
+            try:
+                response = await call_next(request)
+            except Exception as exc:
+                duration_ms = int((time.monotonic() - started) * 1000)
+                _access_logger.info(json.dumps({
+                    "ts": time.time(),
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": 500,
+                    "duration_ms": duration_ms,
+                    "ip": request.client.host if request.client else "",
+                    "error": str(exc),
+                }, ensure_ascii=False))
+                raise
+            duration_ms = int((time.monotonic() - started) * 1000)
+            _access_logger.info(json.dumps({
+                "ts": time.time(),
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": duration_ms,
+                "ip": request.client.host if request.client else "",
+            }, ensure_ascii=False))
+            return response
+
+    app.add_middleware(_AccessLogMiddleware)
+
+    # Rate limiting for mutating operations. Configurable via setting
+    # JOB_RATE_LIMIT_PER_MINUTE (default 60). Bypassed in PUBLIC_MODE
+    # so desktop/local usage remains unrestricted.
+    from .rate_limiter import get_limiter as _get_limiter
+    _rate_limiter = _get_limiter()
+
+    class _RateLimitMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+                # Read limit from settings if available; default 60.
+                limit = 60
+                try:
+                    limit = int(AppSettings(client).get("JOB_RATE_LIMIT_PER_MINUTE") or 60)
+                except Exception:
+                    pass
+                if not _rate_limiter.allow(request, limit=limit):
+                    from fastapi import HTTPException
+                    raise HTTPException(status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests"})
+            return await call_next(request)
+
+    app.add_middleware(_RateLimitMiddleware)
+
+    # Security headers: HSTS, X-Content-Type-Options, etc.
+    SECURITY_HEADERS = {
+        "strict-transport-security": "max-age=63072000; includeSubDomains",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+        "referrer-policy": "no-referrer",
+        "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https:;",
+    }
+
+    class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            response = await call_next(request)
+            for key, value in SECURITY_HEADERS.items():
+                response.headers[key] = value
+            return response
+
+    app.add_middleware(_SecurityHeadersMiddleware)
+
+    # Metrics endpoint (Prometheus-style text). Read-only, no auth.
+    @app.get("/metrics")
+    def metrics():
+        from .metrics import render as metrics_render
+        return Response(metrics_render(), media_type="text/plain; charset=utf-8")
+
+    from .social.api import register_social_routes
+
+    register_social_routes(app, client)
 
     return app

@@ -20,6 +20,28 @@ export function apiBase(): string {
   return localStorage.getItem("gaeclip_api_base") || defaultApiBase();
 }
 
+const API_TOKEN_KEY = "gaeclip_api_token";
+
+export function apiToken(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(API_TOKEN_KEY) || "";
+}
+
+export function saveApiToken(value: string): void {
+  if (typeof window === "undefined") return;
+  const token = value.trim();
+  if (token) localStorage.setItem(API_TOKEN_KEY, token);
+  else localStorage.removeItem(API_TOKEN_KEY);
+}
+
+function withAuth(init?: RequestInit): RequestInit {
+  const token = apiToken();
+  if (!token) return init ?? {};
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+  return { ...init, headers };
+}
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -51,16 +73,20 @@ function networkError(): ApiError {
   return new ApiError("API tidak terjangkau — cek API hidup dan Endpoint di Pengaturan", 0, "NETWORK_ERROR");
 }
 
-async function safeFetch(input: string, init?: RequestInit): Promise<Response> {
+export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(input, init);
+    return await fetch(input, withAuth(init));
   } catch {
     throw networkError();
   }
 }
 
+async function safeFetch(input: string, init?: RequestInit): Promise<Response> {
+  return apiFetch(input, init);
+}
+
 export async function listJobs(base: string, limit = 100): Promise<Job[]> {
-  const res = await fetch(`${base}/api/v1/jobs?limit=${limit}`, { cache: "no-store" });
+  const res = await apiFetch(`${base}/api/v1/jobs?limit=${limit}`, { cache: "no-store" });
   if (!res.ok) await parseError(res, "Gagal memuat daftar job");
   const payload = await res.json();
   return payload.jobs ?? [];
@@ -73,7 +99,7 @@ export async function getJob(base: string, jobId: string): Promise<Job> {
 }
 
 export async function createJob(base: string, input: CreateJobInput): Promise<Job> {
-  const res = await fetch(`${base}/api/v1/jobs`, {
+  const res = await apiFetch(`${base}/api/v1/jobs`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -88,6 +114,19 @@ export async function createJob(base: string, input: CreateJobInput): Promise<Jo
       burn_subtitles: input.burn_subtitles,
       subtitle_style: input.subtitle_style,
       subtitle_position: input.subtitle_position,
+      subtitle_max_words_per_line: input.subtitle_max_words_per_line,
+      brand_enabled: input.brand_enabled,
+      brand_template: input.brand_template,
+      brand_channel_name: input.brand_channel_name || null,
+      brand_avatar_asset: input.brand_avatar_asset || null,
+      brand_display_mode: input.brand_display_mode,
+      brand_position: input.brand_position,
+      brand_timing: input.brand_timing,
+      brand_duration: input.brand_duration,
+      brand_blur: input.brand_blur,
+      brand_dim: input.brand_dim,
+      brand_animation: input.brand_animation,
+      brand_additional_text: input.brand_additional_text || null,
     }),
   });
   if (!res.ok) await parseError(res, "URL tidak dapat diproses");
@@ -104,16 +143,64 @@ export async function searchJobs(base: string, params: JobSearchParams): Promise
   if (params.sort) query.set("sort", params.sort);
   query.set("page", String(params.page ?? 1));
   query.set("per_page", String(params.per_page ?? 20));
-  const res = await fetch(`${base}/api/v1/jobs/search?${query.toString()}`, { cache: "no-store" });
+  const res = await apiFetch(`${base}/api/v1/jobs/search?${query.toString()}`, { cache: "no-store" });
   if (!res.ok) await parseError(res, "Gagal mencari job");
   return res.json();
 }
 
 export async function listChannels(base: string): Promise<ChannelInfo[]> {
-  const res = await fetch(`${base}/api/v1/channels`, { cache: "no-store" });
+  const res = await apiFetch(`${base}/api/v1/channels`, { cache: "no-store" });
   if (!res.ok) await parseError(res, "Gagal memuat channel");
   const payload = await res.json();
   return payload.channels ?? [];
+}
+
+export interface BrandAsset {
+  asset_id: string;
+  preview_url: string;
+}
+
+export async function uploadBrandAvatar(base: string, file: File): Promise<BrandAsset> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await apiFetch(`${base}/api/v1/brand-assets/avatar/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) await parseError(res, "Gagal mengunggah avatar");
+  return res.json();
+}
+
+export async function resolveBrandAvatar(base: string, channelName: string): Promise<BrandAsset> {
+  const res = await apiFetch(`${base}/api/v1/brand-assets/avatar/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ channel_name: channelName }),
+  });
+  if (!res.ok) await parseError(res, "Avatar channel tidak ditemukan");
+  return res.json();
+}
+
+export interface BrandChannelIdentity {
+  channel_name: string | null;
+  channel_id: string | null;
+  asset_id: string | null;
+  preview_url: string | null;
+}
+
+export async function resolveBrandAvatarUrl(
+  base: string,
+  url: string,
+  opts?: { signal?: AbortSignal },
+): Promise<BrandChannelIdentity> {
+  const res = await apiFetch(`${base}/api/v1/brand-assets/avatar/resolve-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+    signal: opts?.signal,
+  });
+  if (!res.ok) await parseError(res, "Gagal mengenali channel dari URL");
+  return res.json();
 }
 
 export async function refreshJobMetadata(base: string, jobId: string): Promise<{ queued: boolean }> {
@@ -123,7 +210,7 @@ export async function refreshJobMetadata(base: string, jobId: string): Promise<{
 }
 
 export async function backfillVideos(base: string, limit = 20): Promise<{ queued: number; filled_from_cache: number }> {
-  const res = await fetch(`${base}/api/v1/videos/backfill?limit=${limit}`, { method: "POST" });
+  const res = await apiFetch(`${base}/api/v1/videos/backfill?limit=${limit}`, { method: "POST" });
   if (!res.ok) await parseError(res, "Gagal memulai backfill");
   return res.json();
 }
@@ -169,13 +256,13 @@ export async function recreateJob(base: string, jobId: string, forceRetranscribe
 }
 
 export async function getServerConfig(base: string): Promise<ServerConfig> {
-  const res = await fetch(`${base}/health/config`, { cache: "no-store" });
+  const res = await apiFetch(`${base}/health/config`, { cache: "no-store" });
   if (!res.ok) await parseError(res, "Gagal memuat konfigurasi server");
   return res.json();
 }
 
 export async function getAppSettings(base: string): Promise<AppSetting[]> {
-  const res = await fetch(`${base}/api/v1/settings`, { cache: "no-store" });
+  const res = await apiFetch(`${base}/api/v1/settings`, { cache: "no-store" });
   if (!res.ok) await parseError(res, "Gagal memuat pengaturan");
   const payload = await res.json();
   return payload.settings ?? [];
@@ -185,7 +272,7 @@ export async function patchAppSettings(
   base: string,
   settings: Record<string, string | number | boolean>
 ): Promise<AppSetting[]> {
-  const res = await fetch(`${base}/api/v1/settings`, {
+  const res = await apiFetch(`${base}/api/v1/settings`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ settings }),
@@ -196,7 +283,7 @@ export async function patchAppSettings(
 }
 
 export async function resetAppSetting(base: string, key: string): Promise<AppSetting[]> {
-  const res = await fetch(`${base}/api/v1/settings/${encodeURIComponent(key)}`, { method: "DELETE" });
+  const res = await apiFetch(`${base}/api/v1/settings/${encodeURIComponent(key)}`, { method: "DELETE" });
   if (!res.ok) await parseError(res, "Gagal mereset pengaturan");
   const payload = await res.json();
   return payload.settings ?? [];
@@ -218,7 +305,7 @@ export interface GeminiTestResult {
 }
 
 export async function testGemini(base: string, apiKey?: string): Promise<GeminiTestResult> {
-  const res = await fetch(`${base}/api/v1/settings/test/gemini`, {
+  const res = await apiFetch(`${base}/api/v1/settings/test/gemini`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(apiKey ? { api_key: apiKey } : {}),
@@ -228,19 +315,19 @@ export async function testGemini(base: string, apiKey?: string): Promise<GeminiT
 }
 
 export async function getAiModels(base: string): Promise<AiModelsResponse> {
-  const res = await fetch(`${base}/api/v1/settings/ai/models`, { cache: "no-store" });
+  const res = await apiFetch(`${base}/api/v1/settings/ai/models`, { cache: "no-store" });
   if (!res.ok) await parseError(res, "Gagal memuat daftar model Gemini");
   return res.json();
 }
 
 export async function refreshAiModels(base: string): Promise<AiRefreshResult> {
-  const res = await fetch(`${base}/api/v1/settings/ai/models/refresh`, { method: "POST" });
+  const res = await apiFetch(`${base}/api/v1/settings/ai/models/refresh`, { method: "POST" });
   if (!res.ok) await parseError(res, "Gagal me-refresh daftar model Gemini");
   return res.json();
 }
 
 export async function getAiSelection(base: string): Promise<AiSelectionResponse> {
-  const res = await fetch(`${base}/api/v1/settings/ai/selection`, { cache: "no-store" });
+  const res = await apiFetch(`${base}/api/v1/settings/ai/selection`, { cache: "no-store" });
   if (!res.ok) await parseError(res, "Gagal memuat konfigurasi chain AI");
   return res.json();
 }
@@ -248,7 +335,7 @@ export async function getAiSelection(base: string): Promise<AiSelectionResponse>
 /* ── Gemini provider pool ── */
 
 async function poolFetch(base: string, path: string, init?: RequestInit, fallback?: string) {
-  const res = await fetch(`${base}${path}`, init);
+  const res = await apiFetch(`${base}${path}`, init);
   if (!res.ok) await parseError(res, fallback ?? "Operasi provider gagal");
   return res.json();
 }
@@ -312,13 +399,13 @@ export function testFallbackChain(base: string, failProviderIds: string[]) {
 }
 
 export async function getYoutubeCookies(base: string): Promise<{ configured: boolean }> {
-  const res = await fetch(`${base}/api/v1/settings/youtube-cookies`, { cache: "no-store" });
+  const res = await apiFetch(`${base}/api/v1/settings/youtube-cookies`, { cache: "no-store" });
   if (!res.ok) await parseError(res, "Gagal memuat status cookies");
   return res.json();
 }
 
 export async function saveYoutubeCookies(base: string, cookies_txt: string): Promise<{ saved: boolean }> {
-  const res = await fetch(`${base}/api/v1/settings/youtube-cookies`, {
+  const res = await apiFetch(`${base}/api/v1/settings/youtube-cookies`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cookies_txt }),
   });
@@ -343,7 +430,7 @@ export interface TalkNetStatus {
 }
 
 export async function getTalkNetStatus(base: string): Promise<TalkNetStatus> {
-  const res = await fetch(`${base}/api/v1/vision/talknet/status`, { cache: "no-store" });
+  const res = await apiFetch(`${base}/api/v1/vision/talknet/status`, { cache: "no-store" });
   if (!res.ok) await parseError(res, "Gagal memuat status TalkNet");
   return res.json();
 }
@@ -356,13 +443,13 @@ export async function checkHealth(base: string): Promise<{ api: boolean; worker:
   let api = false;
   let worker = false;
   try {
-    const live = await fetch(`${base}/health/live`, { cache: "no-store" });
+    const live = await apiFetch(`${base}/health/live`, { cache: "no-store" });
     api = live.ok;
   } catch {
     api = false;
   }
   try {
-    const ready = await fetch(`${base}/health/ready`, { cache: "no-store" });
+    const ready = await apiFetch(`${base}/health/ready`, { cache: "no-store" });
     worker = ready.ok;
   } catch {
     worker = false;
@@ -391,7 +478,7 @@ export interface WorkerStatus {
 }
 
 export async function getWorkerStatus(base: string): Promise<WorkerStatus> {
-  const res = await fetch(`${base}/api/v1/worker/status`, { cache: "no-store" });
+  const res = await apiFetch(`${base}/api/v1/worker/status`, { cache: "no-store" });
   if (!res.ok) await parseError(res, "Gagal memuat status worker");
   return res.json();
 }

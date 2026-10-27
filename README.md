@@ -83,7 +83,10 @@ GAECLIP_VERSION=1.2.3 docker compose -f docker-compose.prod.yml up -d
 All settings live in `.env` (copy from `.env.example`). Two kinds:
 
 1. **Infrastructure** (read at startup, needs restart): `REDIS_URL`, `STORAGE_ROOT`,
-   ports, `FRONTEND_ORIGINS`, `SETTINGS_SECRET`.
+   ports, `FRONTEND_ORIGINS`, `SETTINGS_SECRET`, `PUBLIC_MODE`, `API_AUTH_TOKEN`.
+   A public bind (`PUBLIC_MODE=true`, e.g. behind Cloudflare Tunnel) refuses to
+   start without `API_AUTH_TOKEN`; enter the same token under
+   Settings → Koneksi API.
 2. **Application seed** (first boot only, afterwards the database wins — prefer the
    Settings UI): `GEMINI_API_KEY`, `GEMINI_MODEL`, clip durations, worker tuning.
 

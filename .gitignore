@@ -65,6 +65,11 @@ bin/
 binaries/
 *.exe
 
+# --- Cloudflare Tunnel local config / credentials (never commit) ---
+cloudflared/config.yml
+cloudflared/tunnel.json
+cloudflared/*.json
+
 # --- Docker Compose local overrides (never commit personal tweaks) ---
 docker-compose.override.yml
 docker-compose.local.yml

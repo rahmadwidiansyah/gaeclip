@@ -4,6 +4,11 @@
 
 FROM node:22-slim AS frontend-builder
 WORKDIR /build
+# NEXT_PUBLIC_* vars are inlined by Next.js at build time (not runtime),
+# so the API base must arrive as a build arg. Compose passes
+# NEXT_PUBLIC_API_BASE_URL through (default: the public domain).
+ARG NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
 COPY frontend ./
@@ -37,4 +42,6 @@ COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
 
 EXPOSE 8000 3000
+# NOTE: externally published as host 4114->8000 (API) and 4113->3000 (UI)
+# on 0.0.0.0 — see docker-compose.yml.
 CMD ["./docker-entrypoint.sh"]

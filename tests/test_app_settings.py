@@ -83,8 +83,20 @@ class SchemaTests(unittest.TestCase):
             "MAX_LLM_OUTPUT_TOKENS", "MAX_LLM_INPUT_CHARS",
             "MAX_CONCURRENT_JOBS", "ARTIFACT_RETENTION_HOURS",
             "INTERMEDIATE_RETENTION_HOURS",
+            "SOCIAL_YOUTUBE_CLIENT_ID", "SOCIAL_YOUTUBE_CLIENT_SECRET",
+            "SOCIAL_TIKTOK_CLIENT_KEY", "SOCIAL_TIKTOK_CLIENT_SECRET",
+            "SOCIAL_META_APP_ID", "SOCIAL_META_APP_SECRET",
+            "SOCIAL_INSTAGRAM_APP_ID", "SOCIAL_INSTAGRAM_APP_SECRET",
+            "SOCIAL_PUBLIC_MEDIA_BASE_URL",
+            "SOCIAL_OAUTH_HOST", "SOCIAL_OAUTH_PORT",
         }
         self.assertEqual(set(DEFS), expected)
+
+    def test_social_oauth_secrets_encrypted_type(self):
+        for key in ("SOCIAL_YOUTUBE_CLIENT_SECRET", "SOCIAL_TIKTOK_CLIENT_SECRET",
+                    "SOCIAL_META_APP_SECRET", "SOCIAL_INSTAGRAM_APP_SECRET"):
+            self.assertEqual(DEFS[key].type, "secret")
+            self.assertEqual(DEFS[key].category, "Social Publishing")
 
     def test_spec_defaults(self):
         self.assertEqual(DEFS["GEMINI_MODEL"].default, "gemini-3.8-flash")
@@ -100,7 +112,7 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(DEFS["MAX_TRANSCRIPT_CHARS"].default, "1000000")
 
     def test_infra_keys_not_editable(self):
-        for key in ("REDIS_URL", "STORAGE_ROOT", "API_HOST", "API_PORT", "PUBLIC_MODE"):
+        for key in ("REDIS_URL", "STORAGE_ROOT", "API_HOST", "API_PORT", "PUBLIC_MODE", "API_AUTH_TOKEN"):
             self.assertIn(key, INFRASTRUCTURE_KEYS)
             self.assertNotIn(key, DEFS)
 

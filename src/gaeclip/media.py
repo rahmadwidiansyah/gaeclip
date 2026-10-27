@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from .errors import ExternalCommandError
 from .visual import CropInstruction
@@ -208,9 +209,15 @@ def render_static_vertical(
     preset: str | None = None,
     crf: int | None = None,
     fps: float | None = None,
+    branding: Any | None = None,
 ) -> Path:
     """Static center-crop render. ``preset=None`` keeps the production
-    default; ``GAECLIP_RENDER_PROFILE=dev`` selects the fast dev preset."""
+    default; ``GAECLIP_RENDER_PROFILE=dev`` selects the fast dev preset.
+
+    ``branding`` is a resolved :class:`branding.BrandPlan` (or None for the
+    legacy plain render). When set, the brand overlay is composited in this
+    same pass, before the subtitles filter; audio is untouched.
+    """
     from .framing_config import resolve_encode_preset
 
     preset = resolve_encode_preset(preset)
@@ -227,15 +234,34 @@ def render_static_vertical(
     else:
         crop_x = crop_y = 0
         crop_w, crop_h, out_w, out_h = width, height, width, height
-    vf = (
+    vf_base = (
         f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y},"
         f"scale={out_w}:{out_h}:flags=lanczos,setsar=1:1,fps={fps}"
     )
-    if subtitles is not None:
-        vf += f",{_subtitle_filter(subtitles)}"
-    run_command([
-        "ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", str(source),
-        "-t", f"{duration:.3f}", "-vf", vf, "-c:v", "libx264",
+    tail = f",{_subtitle_filter(subtitles)}" if subtitles is not None else ""
+    use_avatar = False
+    if branding is not None:
+        from .branding import build_brand_chains, plan_needs_avatar_input, resolve_brand_font
+
+        use_avatar = plan_needs_avatar_input(branding)
+        vf = build_brand_chains(
+            vf_base, branding, tail, resolve_brand_font(), duration,
+            avatar_src="[1:v]" if use_avatar else None,
+            in_label="[0:v]" if use_avatar else "[in]",
+        )
+    else:
+        vf = vf_base + tail
+    cmd = ["ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", str(source)]
+    if use_avatar:
+        assert branding is not None and branding.avatar_path is not None
+        cmd += ["-loop", "1", "-framerate", str(fps), "-i", str(branding.avatar_path)]
+    cmd += ["-t", f"{duration:.3f}"]
+    if use_avatar:
+        cmd += ["-filter_complex", vf, "-map", "[vout]", "-map", "0:a?"]
+    else:
+        cmd += ["-vf", vf]
+    run_command(cmd + [
+        "-c:v", "libx264",
         "-preset", preset, "-crf", str(crf),
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", AUDIO_BITRATE,
         "-movflags", "+faststart",
@@ -349,9 +375,14 @@ def render_dynamic_vertical(
     preset: str | None = None,
     crf: int | None = None,
     fps: float | None = None,
+    branding: Any | None = None,
 ) -> Path:
     """Dynamic trim/concat render. ``preset=None`` keeps the production
-    default; ``GAECLIP_RENDER_PROFILE=dev`` selects the fast dev preset."""
+    default; ``GAECLIP_RENDER_PROFILE=dev`` selects the fast dev preset.
+
+    ``branding`` is a resolved :class:`branding.BrandPlan` (or None for the
+    legacy plain render), composited after the concat and before subtitles;
+    audio is untouched."""
     from .framing_config import resolve_encode_preset
 
     preset = resolve_encode_preset(preset)
@@ -408,21 +439,33 @@ def render_dynamic_vertical(
     final_input = "".join(outputs)
     filters.append(f"{final_input}concat=n={len(outputs)}:v=1:a=0[vconcatraw]")
     filters.append(f"[vconcatraw]fps={fps}[vconcat]")
-    if subtitles is not None:
+    audio_start = min(item.start for item in instructions)
+    audio_end = max(item.end for item in instructions)
+    audio_span = max(0.1, audio_end - audio_start)
+    if branding is not None:
+        from .branding import extend_complex, resolve_brand_font
+
+        tail = _subtitle_filter(subtitles) if subtitles is not None else None
+        extend_complex(filters, "vconcat", tail, branding, resolve_brand_font(), audio_span)
+    elif subtitles is not None:
         filters.append(
             f"[vconcat]{_subtitle_filter(subtitles)}[vout]"
         )
     else:
         filters.append("[vconcat]null[vout]")
-    audio_start = min(item.start for item in instructions)
-    audio_end = max(item.end for item in instructions)
-    audio_span = max(0.1, audio_end - audio_start)
     filters.append(
         f"[0:a]atrim=start={audio_start:.3f}:end={audio_end:.3f},"
         f"asetpts=PTS-STARTPTS[aout]"
     )
-    run_command([
-        "ffmpeg", "-y", "-i", str(source), "-filter_complex", ";".join(filters),
+    cmd = ["ffmpeg", "-y", "-i", str(source)]
+    if branding is not None:
+        from .branding import plan_needs_avatar_input
+
+        if plan_needs_avatar_input(branding):
+            assert branding.avatar_path is not None
+            cmd += ["-loop", "1", "-framerate", str(fps), "-i", str(branding.avatar_path)]
+    run_command(cmd + [
+        "-filter_complex", ";".join(filters),
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", AUDIO_BITRATE,
@@ -517,6 +560,7 @@ def render_trajectory_vertical(
     preset: str | None = None,
     crf: int | None = None,
     cmdfile: Path | None = None,
+    branding: Any | None = None,
 ) -> Path:
     """Single-pass smooth crop render. ``keyframes`` are normalized
     (t, cx, cy, w, h, scene); they are sampled at every OUTPUT frame
@@ -524,6 +568,9 @@ def render_trajectory_vertical(
     even-rounded, and driven per-frame via a sendcmd file. Order
     preserved: crop -> scale -> setsar -> fps -> subtitle LAST. Audio
     mapping identical to the legacy dynamic path.
+
+    ``branding`` is a resolved :class:`branding.BrandPlan` (or None),
+    composited after fps and before subtitles; audio is untouched.
     """
     from .framing_config import resolve_encode_preset
 
@@ -550,17 +597,35 @@ def render_trajectory_vertical(
     t0, x0, y0, w0, h0 = sampled[0]
     cmd_path = cmdfile or output.with_name(f"{output.stem}_crop.txt")
     write_sendcmd_file(sampled, cmd_path)
-    vf = (
+    vf_base = (
         f"sendcmd=f='{str(cmd_path)}',"
         f"crop={w0}:{h0}:{x0}:{y0},"
         f"scale={width}:{height}:flags=lanczos,setsar=1,fps={fps}"
     )
-    if subtitles is not None:
-        vf += f",{_subtitle_filter(subtitles)}"
+    tail = f",{_subtitle_filter(subtitles)}" if subtitles is not None else ""
+    use_avatar = False
+    if branding is not None:
+        from .branding import build_brand_chains, plan_needs_avatar_input, resolve_brand_font
+
+        use_avatar = plan_needs_avatar_input(branding)
+        vf = build_brand_chains(
+            vf_base, branding, tail, resolve_brand_font(), span,
+            avatar_src="[1:v]" if use_avatar else None,
+            in_label="[0:v]" if use_avatar else "[in]",
+        )
+    else:
+        vf = vf_base + tail
     audio_span = max(0.1, span)
-    run_command([
-        "ffmpeg", "-y", "-i", str(source), "-vf", vf,
-        "-map", "0:v:0", "-map", "0:a?",
+    cmd = ["ffmpeg", "-y", "-i", str(source)]
+    if use_avatar:
+        assert branding is not None and branding.avatar_path is not None
+        cmd += ["-loop", "1", "-framerate", str(fps), "-i", str(branding.avatar_path)]
+    cmd += ["-filter_complex" if use_avatar else "-vf", vf]
+    if use_avatar:
+        cmd += ["-map", "[vout]", "-map", "0:a?"]
+    else:
+        cmd += ["-map", "0:v:0", "-map", "0:a?"]
+    run_command(cmd + [
         "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", AUDIO_BITRATE,
         "-movflags", "+faststart",

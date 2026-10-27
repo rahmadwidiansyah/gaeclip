@@ -4,7 +4,7 @@ import os
 
 from celery import Celery
 
-from .worker import process_job, refresh_video_metadata
+from .worker import process_job, process_publish, refresh_video_metadata
 
 app = Celery("gaeclip", broker=os.getenv("REDIS_URL", "redis://redis:6379/0"))
 app.conf.update(
@@ -28,3 +28,8 @@ def process(job_id: str):
 @app.task(name="gaeclip.refresh_metadata")
 def refresh(job_id: str):
     return refresh_video_metadata(job_id)
+
+
+@app.task(name="gaeclip.publish_clip")
+def publish(publish_job_id: str):
+    return process_publish(publish_job_id)

@@ -35,7 +35,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: "pyproject.toml"
+          cache-dependency-path: |
+            pyproject.toml
+            requirements-windows.lock
 
       - uses: actions/setup-node@v4
         with:
@@ -45,6 +47,10 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          # Pin the compiler: a floating stable can break the Tauri build
+          # without any source change. Bump together with Cargo.lock.
+          toolchain: 1.99.0
 
       - name: Rust dependency cache
         uses: Swatinem/rust-cache@v2
@@ -52,11 +58,13 @@ jobs:
           workspaces: src-tauri
           cache-provider: github
 
-      - name: Install Python deps (API set, CPU torch)
+      - name: Install Python deps (locked, CPU torch)
         run: |
-          python -m pip install -e ".[api,llm,transcription,framing,dev]"
-          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install pyinstaller
+          # requirements-windows.lock is the exact package set from the
+          # last green Windows run. Keep it in sync with pyproject.toml.
+          python -m pip install -r requirements-windows.lock `
+            --extra-index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-deps --no-build-isolation
 
       - name: Backend regression (server default)
         run: python -m pytest tests/ -q --ignore=tests/test_vision_benchmark.py
@@ -77,7 +85,7 @@ jobs:
             --collect-all gaeclip `
             --collect-all mediapipe `
             --collect-all ultralytics `
-            --collect-all opencv-python-headless `
+            --collect-all cv2 `
             --collect-all faster_whisper `
             --collect-all ctranslate2 `
             --collect-all onnxruntime `
@@ -95,6 +103,38 @@ jobs:
           # where the bootloader looks for python DLLs).
           Copy-Item -Recurse dist/gaeclip-api/_internal `
             src-tauri/binaries/_internal
+
+      - name: Smoke test bundled backend exe (PyInstaller)
+        run: |
+          # The source-runtime smoke test below proves gaeclip.desktop
+          # works. It does NOT prove the frozen bundle works: hidden
+          # imports and missing DLLs only fail in dist/. Boot the real
+          # onedir exe, hit health/config, then touch a social route so
+          # the new gaeclip.social package is proven importable.
+          $ErrorActionPreference = "Stop"
+          Remove-Item Env:API_AUTH_TOKEN -ErrorAction SilentlyContinue
+          $env:GAECLIP_RUNTIME = "desktop"
+          $env:API_HOST = "127.0.0.1"
+          $env:API_PORT = "8010"
+          $env:STORAGE_ROOT = "$env:RUNNER_TEMP/gaeclip-exe-storage"
+          $exe = (Resolve-Path "dist/gaeclip-api/gaeclip-api.exe").Path
+          $proc = Start-Process -FilePath $exe -PassThru -NoNewWindow `
+            -WorkingDirectory (Split-Path $exe)
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 45; $i++) {
+              Start-Sleep 2
+              try {
+                $cfg = Invoke-RestMethod http://127.0.0.1:8010/health/config
+                if ($cfg.runtime -eq "desktop") { $ok = $true; break }
+              } catch {}
+            }
+            if (-not $ok) { throw "bundled backend did not report runtime=desktop" }
+            $accounts = Invoke-RestMethod http://127.0.0.1:8010/api/v1/social/accounts
+            if ($null -eq $accounts.accounts) { throw "social API missing from bundle" }
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Fetch third-party binaries
         run: |
@@ -128,10 +168,12 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           Push-Location frontend
-          npm install
+          npm ci
           npm run build
           Pop-Location
-          npx --yes @tauri-apps/cli build --bundles nsis
+          # Local, pinned devDependency — never npx --yes (floating CLI).
+          # Run from the repo root so the CLI finds src-tauri/.
+          & "frontend/node_modules/.bin/tauri.cmd" build --bundles nsis
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

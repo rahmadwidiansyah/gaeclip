@@ -4,7 +4,7 @@ import type { AppSetting, GeminiProviderInfo } from "./types";
  *  Backend category strings are mapped to nav categories; no setting
  *  is renamed, moved in storage, or re-validated here. */
 
-export type SettingsCategoryId = "general" | "ai" | "video" | "transcript" | "advanced" | "system";
+export type SettingsCategoryId = "general" | "ai" | "video" | "transcript" | "social" | "advanced" | "system";
 
 export interface SettingsCategory {
   id: SettingsCategoryId;
@@ -36,6 +36,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   { id: "ai", label: "AI & Gemini", blurb: "Provider, model & fallback", backendCategories: ["AI & Models"] },
   { id: "video", label: "Video & Rendering", blurb: "Kualitas & output", backendCategories: ["Processing"] },
   { id: "transcript", label: "Transkripsi", blurb: "Bahasa & subtitle", backendCategories: ["Transcript & LLM"] },
+  { id: "social", label: "Social", blurb: "Akun & publish Reel/Shorts", backendCategories: ["Social Publishing"] },
   { id: "advanced", label: "Lanjutan", blurb: "Penyimpanan, log & tuning", backendCategories: ["Storage & Retention", "Logging"] },
   { id: "system", label: "Sistem", blurb: "Status & info runtime", backendCategories: [] },
 ];
@@ -98,6 +99,16 @@ export function searchSettings(
   for (const area of geminiAreas) {
     if (area.keys.some((k) => k.includes(q) || q.includes(k)) || area.title.toLowerCase().includes(q)) {
       push("ai", area.title, area.detail, area.tab);
+    }
+  }
+  const socialAreas: { title: string; detail: string; keys: string[] }[] = [
+    { title: "Social Accounts", detail: "Hubungkan akun YouTube, TikTok, Instagram, Facebook", keys: ["social", "account", "akun", "youtube", "tiktok", "instagram", "facebook", "connect", "hubungkan", "publish", "reels", "shorts"] },
+    { title: "Developer Configuration", detail: "OAuth Client ID/Secret tiap provider", keys: ["oauth", "credential", "kredensial", "client id", "client secret", "app id", "developer", "pengembang"] },
+    { title: "Advanced OAuth Settings", detail: "Callback host & port", keys: ["callback", "host", "port", "advanced", "lanjutan", "docker"] },
+  ];
+  for (const area of socialAreas) {
+    if (area.keys.some((k) => k.includes(q) || q.includes(k)) || area.title.toLowerCase().includes(q)) {
+      push("social", area.title, area.detail);
     }
   }
   return hits.slice(0, 12);

@@ -51,6 +51,10 @@ class Settings:
     render_profile: str
     public_mode: bool
     transcript_source: str = "youtube_first"
+    api_auth_token: str = ""
+    job_rate_limit_per_minute: int = 60
+    audit_max_bytes: int = 50 * 1024 * 1024
+    signed_url_secret: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -95,6 +99,12 @@ class Settings:
             transcript_source=str(service.get("TRANSCRIPT_SOURCE")),
             render_profile=str(service.get("RENDER_PROFILE")),
             public_mode=os.getenv("PUBLIC_MODE", "false").lower() == "true",
+            # Env-only: a bearer token must never live in the shared
+            # settings DB / UI, where it could be read back.
+            api_auth_token=os.getenv("API_AUTH_TOKEN", "").strip(),
+            job_rate_limit_per_minute=_int("JOB_RATE_LIMIT_PER_MINUTE", 60),
+            audit_max_bytes=_int("AUDIT_MAX_BYTES", 50 * 1024 * 1024),
+            signed_url_secret=os.getenv("SIGNED_URL_SECRET", "").strip(),
         )
         values.validate()
         return values
@@ -138,6 +148,11 @@ class Settings:
             raise ConfigurationError("CLIP_BUFFER_SECONDS must be between 0 and 5")
         if self.public_mode and self.api_host in {"127.0.0.1", "localhost", "::1"}:
             raise ConfigurationError("PUBLIC_MODE requires a non-loopback API host")
+        if self.public_mode and not self.api_auth_token:
+            raise ConfigurationError(
+                "PUBLIC_MODE requires API_AUTH_TOKEN; refusing to expose an "
+                "unauthenticated API"
+            )
         if self.transcript_source not in {"youtube_first", "whisper_only", "youtube_only"}:
             raise ConfigurationError("TRANSCRIPT_SOURCE must be youtube_first, whisper_only, or youtube_only")
 

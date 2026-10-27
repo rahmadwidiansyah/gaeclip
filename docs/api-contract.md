@@ -105,6 +105,19 @@ Not implemented yet: `GET /health/config`, stage weights/`ETA`,
 `correlation_id`/metrics. Worker progress today is `10` (running) then `100`
 (completed).
 
-For the local profile, authentication is intentionally omitted because the API
-must bind only to `127.0.0.1`. Enabling `PUBLIC_MODE=true` without authentication
-is invalid and must prevent startup.
+For the local profile, authentication is optional because the API binds to
+`127.0.0.1`. A token can still be enabled with `API_AUTH_TOKEN`. Enabling
+`PUBLIC_MODE=true` without `API_AUTH_TOKEN` is invalid and prevents startup.
+
+When `API_AUTH_TOKEN` is set, every request except `GET /health/live` and the
+header-less media reads below requires:
+
+```
+Authorization: Bearer <token>
+```
+
+or `X-API-Key: <token>`. CORS preflight (`OPTIONS`) is exempt. The public
+media reads are `GET /api/v1/brand-assets/<id>`, `GET /api/v1/jobs/<id>/clips/<id>`,
+and `GET /api/v1/social/publish/<id>/media` (HTML elements and third-party
+publishers cannot attach headers). Desktop and loopback deployments leave the
+token empty and remain unchanged.
