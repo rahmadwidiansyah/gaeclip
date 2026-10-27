@@ -72,7 +72,7 @@ def write_event(
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as exc:
-        logger.warning("audit write failed: %s", exc)
+        logger.warning("audit write failed: %s", str(exc))
 
 
 def list_recent(storage_root: Path | str | None = None, limit: int = 50) -> list[dict[str, Any]]:
