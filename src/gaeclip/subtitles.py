@@ -4,6 +4,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .errors import ValidationError
 from .schemas import TranscriptLine
@@ -404,13 +405,133 @@ def _split_long_cue(start: float, end: float, text: str, max_chars: int) -> list
     return _split_long_cue(start, mid, left, max_chars) + _split_long_cue(mid, end, right, max_chars)
 
 
+# Punctuation that signals a natural phrase break: a line ending here reads
+# as a finished thought even when the hard word cap would allow more words.
+_SENTENCE_END_PUNCT = frozenset(".!?…")
+
+# Shortest display slice worth emitting (seconds). Guards against
+# zero/negative durations on very short cues; word order is preserved and
+# the final chunk always ends exactly at the cue end.
+_MIN_CHUNK_SECONDS = 0.05
+
+DEFAULT_MAX_WORDS_PER_LINE = 3
+MIN_MAX_WORDS_PER_LINE = 1
+MAX_MAX_WORDS_PER_LINE = 3
+
+
+def normalize_max_words_per_line(value: Any, default: int = DEFAULT_MAX_WORDS_PER_LINE) -> int:
+    """Normalize the per-line word cap into [1, 3].
+
+    ``None``/unparseable values fall back to ``default`` (3); anything above
+    3 is clamped to 3, anything below 1 is clamped to 1. Normalization (not
+    rejection) keeps CLI/pipeline paths robust; the HTTP API additionally
+    validates the raw range.
+    """
+    try:
+        number = int(value) if value is not None else int(default)
+    except (TypeError, ValueError):
+        return int(default)
+    return max(MIN_MAX_WORDS_PER_LINE, min(MAX_MAX_WORDS_PER_LINE, number))
+
+
+def split_words(text: str) -> list[str]:
+    """Split display text into word tokens.
+
+    Whitespace-only split: punctuation stays glued to its word, hyphenated
+    tokens (``gift-gift``), numbers, abbreviations, apostrophes and Unicode
+    all count as exactly one token each. Punctuation alone is never a word.
+    """
+    return [token for token in str(text or "").split() if token]
+
+
+def chunk_words(words: list[str], max_words: int = DEFAULT_MAX_WORDS_PER_LINE) -> list[list[str]]:
+    """Pack words into lines of at most ``max_words`` tokens.
+
+    Greedy fill, but when the window holds more words than fit, the cut
+    prefers the last word ending in sentence punctuation (``. ! ? …``) so
+    phrase breaks land on natural pauses instead of mid-phrase. Word order
+    is preserved; no word is added, removed, duplicated, or split.
+    """
+    cap = normalize_max_words_per_line(max_words)
+    chunks: list[list[str]] = []
+    index = 0
+    total = len(words)
+    while index < total:
+        take = min(cap, total - index)
+        if take == cap and total - index > cap:
+            for size in range(take, 0, -1):
+                if words[index + size - 1][-1:] in _SENTENCE_END_PUNCT:
+                    take = size
+                    break
+        chunks.append(words[index:index + take])
+        index += take
+    return [chunk for chunk in chunks if chunk]
+
+
+def split_cue_words(
+    start: float,
+    end: float,
+    text: str,
+    max_words: int = DEFAULT_MAX_WORDS_PER_LINE,
+) -> list[tuple[float, float, str]]:
+    """Split one cue into timed word-count chunks.
+
+    Timing: proportional to character share (spaces included), same rule as
+    the existing char-based splitter. First chunk starts exactly at
+    ``start``, last ends exactly at ``end``; boundaries are strictly
+    increasing (0.05s floor) so cues stay chronological with no overlap and
+    no zero/negative durations. Invalid spans or empty text yield [].
+    """
+    try:
+        start_f = float(start)
+        end_f = float(end)
+    except (TypeError, ValueError):
+        return []
+    words = split_words(text)
+    if not words or not (end_f > start_f):
+        return []
+    chunks = chunk_words(words, max_words)
+    if not chunks:
+        return []
+    if len(chunks) == 1:
+        return [(start_f, end_f, " ".join(chunks[0]))]
+    sizes = [sum(len(word) for word in chunk) + max(0, len(chunk) - 1) for chunk in chunks]
+    total = sum(sizes) or 1
+    span = end_f - start_f
+    bounds = [start_f]
+    cumulative = 0
+    for size in sizes[:-1]:
+        cumulative += size
+        bounds.append(start_f + span * cumulative / total)
+    bounds.append(end_f)
+    out: list[tuple[float, float, str]] = []
+    for i, chunk in enumerate(chunks):
+        chunk_start = bounds[i] if i == 0 else max(bounds[i], out[-1][1] + _MIN_CHUNK_SECONDS / 2)
+        chunk_end = bounds[i + 1]
+        if i > 0:
+            chunk_start = min(chunk_start, end_f - _MIN_CHUNK_SECONDS)
+        chunk_start = round(max(start_f, chunk_start), 3)
+        chunk_end = round(min(end_f, chunk_end), 3)
+        if chunk_end - chunk_start < _MIN_CHUNK_SECONDS and i < len(chunks) - 1:
+            chunk_end = round(min(end_f, chunk_start + _MIN_CHUNK_SECONDS), 3)
+        if chunk_end > chunk_start:
+            out.append((chunk_start, chunk_end, " ".join(chunk)))
+    if not out:
+        return [(start_f, end_f, " ".join(words))]
+    # The final chunk always owns the cue end (no drift from rounding).
+    last_start, _, last_text = out[-1]
+    out[-1] = (last_start, round(end_f, 3), last_text)
+    return out
+
 def _select_cues(
     lines: list[TranscriptLine],
     offset: float = 0,
     clip_duration: float | None = None,
     max_chars: int = 34,
+    max_words: int = DEFAULT_MAX_WORDS_PER_LINE,
 ) -> list[tuple[float, float, str]]:
     window = clip_duration if clip_duration is not None else 3600
+    cap = normalize_max_words_per_line(max_words)
     cues: list[tuple[float, float, str]] = []
     for line in lines:
         if not (line.end > offset and line.start < offset + window):
@@ -422,7 +543,8 @@ def _select_cues(
         end = max(0, end)
         if end <= start:
             continue
-        cues.extend(_split_long_cue(start, end, line.text, max_chars))
+        for piece_start, piece_end, piece_text in _split_long_cue(start, end, line.text, max_chars):
+            cues.extend(split_cue_words(piece_start, piece_end, piece_text, cap))
     return cues
 
 
@@ -432,6 +554,7 @@ def write_srt(
     offset: float = 0,
     clip_duration: float | None = None,
     max_chars: int = 34,
+    max_words: int = DEFAULT_MAX_WORDS_PER_LINE,
 ) -> None:
     def stamp(seconds: float) -> str:
         millis = max(0, round(seconds * 1000))
@@ -440,7 +563,7 @@ def write_srt(
         seconds, millis = divmod(remainder, 1000)
         return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
 
-    cues = _select_cues(lines, offset, clip_duration, max_chars)
+    cues = _select_cues(lines, offset, clip_duration, max_chars, max_words)
     path.write_text(
         "\n\n".join(
             f"{index}\n{stamp(start)} --> {stamp(end)}\n{_wrap_text(text, max_chars)}"
@@ -461,6 +584,7 @@ def write_ass(
     font_size: int | None = None,
     style: str = "casual_center",
     position: str = "bottom_center",
+    max_words: int = DEFAULT_MAX_WORDS_PER_LINE,
 ) -> None:
     """Write an ASS file with explicit PlayRes so FontSize is exact pixels.
 
@@ -488,7 +612,7 @@ def write_ass(
         secs, centis = divmod(remainder, 100)
         return f"{hours}:{minutes:02d}:{secs:02d}.{centis:02d}"
 
-    cues = _select_cues(lines, offset, clip_duration, max_chars)
+    cues = _select_cues(lines, offset, clip_duration, max_chars, max_words)
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"

@@ -1,11 +1,11 @@
 {
   "name": "gaeclip-frontend",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "test": "node --experimental-strip-types --test app/lib/format.test.ts app/lib/subtitles.test.ts app/lib/clips.test.ts app/lib/icons.test.ts app/lib/ai-models.test.ts app/lib/ai-providers.test.ts app/lib/settings-nav.test.ts app/lib/pagination.test.ts app/lib/provider-forms.test.ts",
+    "test": "node --experimental-strip-types --test app/lib/format.test.ts app/lib/subtitles.test.ts app/lib/clips.test.ts app/lib/icons.test.ts app/lib/ai-models.test.ts app/lib/ai-providers.test.ts app/lib/settings-nav.test.ts app/lib/pagination.test.ts app/lib/provider-forms.test.ts app/lib/social.test.ts app/lib/branding.test.ts",
     "start": "next start -p 3000"
   },
   "dependencies": {
@@ -15,6 +15,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
     "@types/node": "^22.15.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",

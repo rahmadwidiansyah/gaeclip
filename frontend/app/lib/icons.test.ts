@@ -10,7 +10,9 @@ const USED = [
   "edit",
   "sun", "moon", "monitor", "play", "link", "filter", "sort",
   "group", "calendar", "image", "copy",
-  "star", "info", "circle", "loader",
+  "star", "info", "circle", "loader", "upload",
+  "youtube", "tiktok", "instagram", "facebook",
+  "badge", "palette", "type", "eye",
 ];
 
 describe("single icon system (Lucide)", () => {

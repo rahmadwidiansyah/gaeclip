@@ -32,6 +32,19 @@ class JobRecord:
     burn_subtitles: bool = True
     subtitle_style: str = "casual_center"
     subtitle_position: str = "bottom_center"
+    subtitle_max_words_per_line: int = 3
+    brand_enabled: bool = False
+    brand_template: str = "glass_end"
+    brand_channel_name: str | None = None
+    brand_avatar_asset: str | None = None
+    brand_display_mode: str = "avatar_name"
+    brand_position: str = "top_left"
+    brand_timing: str = "last"
+    brand_duration: float = 2.0
+    brand_blur: float = 20.0
+    brand_dim: float = 0.35
+    brand_animation: str = "fade"
+    brand_additional_text: str | None = None
     stage_detail: str | None = None
     current_clip: int = 0
     total_clips: int = 0
@@ -82,11 +95,26 @@ class JobRepository:
         burn_subtitles: bool = True,
         subtitle_style: str = "casual_center",
         subtitle_position: str = "bottom_center",
-        transcript_source: str = "youtube_first",
+        subtitle_max_words_per_line: int = 3,
+        transcript_source: str = "youtube_first",        brand_enabled: bool = False,
+        brand_template: str = "glass_end",
+        brand_channel_name: str | None = None,
+        brand_avatar_asset: str | None = None,
+        brand_display_mode: str = "avatar_name",
+        brand_position: str = "top_left",
+        brand_timing: str = "last",
+        brand_duration: float = 2.0,
+        brand_blur: float = 20.0,
+        brand_dim: float = 0.35,
+        brand_animation: str = "fade",
+        brand_additional_text: str | None = None,
     ) -> str:
         raw = (
             f"{source_url}\0{language}\0{max_clips}\0{min_duration}\0{max_duration}\0"
-            f"{burn_subtitles}\0{subtitle_style}\0{subtitle_position}\0{transcript_source}"
+            f"{burn_subtitles}\0{subtitle_style}\0{subtitle_position}\0{subtitle_max_words_per_line}\0{transcript_source}\0"
+            f"{brand_enabled}\0{brand_template}\0{brand_channel_name}\0{brand_avatar_asset}\0"
+            f"{brand_display_mode}\0{brand_position}\0{brand_timing}\0{brand_duration}\0"
+            f"{brand_blur}\0{brand_dim}\0{brand_animation}\0{brand_additional_text}"
         )
         return hashlib.sha256(raw.encode()).hexdigest()
 

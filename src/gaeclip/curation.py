@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError as PydanticVa
 
 from .errors import CancelledError, ValidationError
 from .schemas import CandidateClip, TranscriptLine
+from .titles import TITLE_PROMPT_RULES, finalize_titles, normalize_title
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +59,14 @@ def deterministic_candidates(
         end_line = lines[end_index]
         if end_line.end - line.start > max_duration:
             continue
+        span_text = " ".join(item.text for item in lines[start_index:end_index + 1])
         candidate = CandidateClip(
             candidate_id=f"c{start_index + 1:06d}",
             start_line_id=line.line_id,
             end_line_id=end_line.line_id,
             start=line.start,
             end=end_line.end,
-            title=line.text[:120],
+            title=normalize_title("", span_text),
             reason="Deterministic transcript-window fallback",
             score=0.5,
         )
@@ -210,7 +212,8 @@ def build_prompt(
         "clipability. "
         "You may also include start, end and score, but line IDs are authoritative "
         "and backend recomputes timing and ranking.\n\n"
-        "TRANSCRIPT_DATA_BEGIN\n"
+        + TITLE_PROMPT_RULES +
+        "\nTRANSCRIPT_DATA_BEGIN\n"
         f"{transcript}\n"
         "TRANSCRIPT_DATA_END"
     ).format(discover=discover, min_duration=min_duration, max_duration=max_duration)
@@ -235,7 +238,18 @@ def parse_provider_response(
         raise ValidationError("LLM returned no usable candidates")
     # Legacy contract caps at max_clips here; the v2 flow re-selects
     # globally upstream (curate_with_fallback) for ranking quality.
-    return [item["clip"] for item in valid[:max_clips]]
+    # Titles are publish-normalized (hook <=60 chars) with span fallbacks.
+    lines_by_id = {line.line_id: line for line in lines}
+    chosen = [item["clip"] for item in valid[:max_clips]]
+    spans = {}
+    for clip in chosen:
+        try:
+            start, end = lines_by_id[clip.start_line_id].start, lines_by_id[clip.end_line_id].end
+            spans[clip.candidate_id] = " ".join(
+                line.text for line in lines if start - 1e-6 <= line.start and line.end <= end + 1e-6)
+        except KeyError:
+            spans[clip.candidate_id] = ""
+    return finalize_titles(chosen, spans)
 
 
 def parse_discovery_pool(
@@ -416,6 +430,7 @@ class GeminiCurator:
                     item["clip"].model_dump() if item.get("clip") else {})
             item["score"] = item["semantic"] if item["semantic"] is not None else item["score"]
         selected, stats = select_final_candidates(valid, self.max_clips)
+        spans = {item["candidate_id"]: item.get("text", "") for item in selected}
         candidates = []
         for item in selected:
             clip = item["clip"]
@@ -423,6 +438,7 @@ class GeminiCurator:
                 "score": round(max(0.0, min(1.0, item["score"])), 3),
             }))
         candidates.sort(key=lambda item: item.start)
+        candidates = finalize_titles(candidates, spans)
         return CurationResult(
             candidates=candidates,
             source="gemini",
@@ -792,11 +808,15 @@ def curate_with_fallback(
                     start_line_id=item["start_line_id"],
                     end_line_id=item["end_line_id"],
                     start=item["start"], end=item["end"],
-                    title=item["title"][:120] or f"Clip {item['candidate_id']}",
+                    title=normalize_title(item["title"] or "", item.get("text", ""))
+                    or f"Clip {item['candidate_id']}",
                     reason=item["reason"], score=item["score"],
                 )
                 for item in selected
             ]
+            candidates = finalize_titles(
+                candidates,
+                {item["candidate_id"]: item.get("text", "") for item in selected})
             candidates.sort(key=lambda item: item.start)
             chosen_ids = {item["candidate_id"] for item in selected}
             logger.info("[CURATION_LEVEL] level=HEATMAP status=success candidates=%d",
@@ -841,11 +861,15 @@ def curate_with_fallback(
                 start_line_id=item["start_line_id"],
                 end_line_id=item["end_line_id"],
                 start=item["start"], end=item["end"],
-                title=item["title"][:120] or f"Clip {item['candidate_id']}",
+                title=normalize_title(item["title"] or "", item.get("text", ""))
+                or f"Clip {item['candidate_id']}",
                 reason=item["reason"], score=item["score"],
             )
             for item in selected
         ]
+        heuristic_selected = finalize_titles(
+            heuristic_selected,
+            {item["candidate_id"]: item.get("text", "") for item in selected})
         heuristic_selected.sort(key=lambda item: item.start)
         logger.info("[CURATION_LEVEL] level=HEURISTIC status=success candidates=%d",
                     len(heuristic_selected))

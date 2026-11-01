@@ -28,6 +28,10 @@ does not contain secrets.
 | `ARTIFACT_RETENTION_HOURS` | integer | `24` | worker | no |
 | `INTERMEDIATE_RETENTION_HOURS` | integer | `6` | worker | no |
 | `PUBLIC_MODE` | boolean | `false` | api | no |
+| `API_AUTH_TOKEN` | string (secret, env-only) | `` | api | no |
+| `JOB_RATE_LIMIT_PER_MINUTE` | integer | `60` | api | no |
+| `AUDIT_MAX_BYTES` | integer (bytes) | `52428800` (50 MiB) | api | no |
+| `SIGNED_URL_SECRET` | string (secret, env-only) | `` | api | no |
 | `GEMINI_MODEL` | string | `gemini-3.8-flash` | worker | no |
 | `GEMINI_TIMEOUT_SECONDS` | integer | `30` | worker | no |
 | `AI_MODEL_MODE` | enum (`automatic`/`manual`) | `automatic` | worker | no |
@@ -43,17 +47,32 @@ Optional visual dependencies are installed with the `vision` extra. They are
 deliberately not part of the base lock because PyTorch wheels differ by CPU,
 CUDA, and operating system. See [visual-models](visual-models.md).
 `requirements.lock` is currently minimal (pydantic stack only) and does not
-yet pin `yt-dlp`/API/frontend dependencies.
+yet pin `yt-dlp`/API/frontend dependencies. The Windows desktop build uses
+`requirements-windows.lock` (exact Python 3.12 package set), and
+`src-tauri/Cargo.lock` pins the Rust/Tauri crates.
 
 ## Implementation status (2026-09-14)
 
 - Enforced by `Settings`: `MAX_*` limits, `MIN<MAX`, positive values,
-  `CLIP_BUFFER_SECONDS` 0–5, `PUBLIC_MODE=true` requires non-loopback host.
-- Documented but not enforced: `ARTIFACT/INTERMEDIATE_RETENTION_HOURS`
-  (no cleanup scheduler; Redis job keys have no TTL — only idempotency keys
-  expire after 24h), `WORKER_CONCURRENCY` (Celery CLI flag, not `Settings`),
-  `FRONTEND_HOST/PORT`, `LOG_LEVEL`, `REDIS_URL` (read via `os.getenv`
-  directly).
+  `CLIP_BUFFER_SECONDS` 0–5, `PUBLIC_MODE=true` requires a non-loopback host
+  and a non-empty `API_AUTH_TOKEN`. The token enables bearer auth for the
+  API (`GET /health/live` and the header-less clip/avatar/provider-media
+  reads stay open).
+- Documented but not enforced: `WORKER_CONCURRENCY` (Celery CLI flag, not `Settings`),
+  `FRONTEND_HOST/PORT`, `LOG_LEVEL`, `REDIS_URL` (read via `os.getenv` directly).
+- Retention enforcement is available via `gaeclip retention [--dry-run]` and can
+  be scheduled with cron or a systemd timer.
+- Audit logging writes structured JSON lines to `<STORAGE_ROOT>/audit.jsonl`;
+  rotation occurs when the file exceeds `AUDIT_MAX_BYTES`.
+- Rate limiting applies to mutating HTTP methods (POST/PUT/PATCH/DELETE) per IP
+  or per bearer token (when `API_AUTH_TOKEN` is set). Override with
+  `JOB_RATE_LIMIT_PER_MINUTE=0` to disable.
+- Signed download URLs can be generated with `gaeclip.signed_urls.sign()` when
+  `SIGNED_URL_SECRET` is configured; the middleware does not yet validate them
+  (future work).
+- A Prometheus-style metrics endpoint is exposed at `/metrics`.
+- Backup and restore are CLI commands: `gaeclip backup <output.tar.gz>` and
+  `gaeclip restore <input.tar.gz> [--target <dir>]`.
 - Local `.env` drift: `GEMINI_MODEL` is `gemini-3.5-flash` locally vs default
   `gemini-2.5-flash`; legacy `FRONTEND_ORIGIN` (singular) vs canonical
   `FRONTEND_ORIGINS` (plural, now present).
@@ -61,7 +80,10 @@ yet pin `yt-dlp`/API/frontend dependencies.
 ## Validation rules
 
 - `PUBLIC_MODE=false` requires API, frontend, and Redis host bindings to remain
-  loopback/local. The application must reject a public bind without auth.
+  loopback/local. The application rejects `PUBLIC_MODE=true` unless
+  `API_AUTH_TOKEN` is set; a public bind with `PUBLIC_MODE=false` is still the
+  operator's responsibility and should be firewalled or fronted by Cloudflare
+  Access.
 - `MIN_CLIP_DURATION_SECONDS < MAX_CLIP_DURATION_SECONDS`.
 - `MAX_CLIPS` and `MAX_CONCURRENT_JOBS` must be positive.
 - retention values and timeouts must be positive.

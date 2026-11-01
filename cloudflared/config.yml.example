@@ -1,0 +1,40 @@
+# GAEClip Cloudflare Tunnel ingress (example).
+#
+# Setup (on this machine, cloudflared installed separately):
+#   1. cloudflared tunnel login
+#   2. cloudflared tunnel create gaeclip
+#      -> prints a TUNNEL_ID; credentials land in ~/.cloudflared/<ID>.json
+#   3. cp cloudflared/config.yml.example cloudflared/config.yml
+#   4. copy ~/.cloudflared/<ID>.json to cloudflared/tunnel.json
+#   5. set tunnel: <ID> below
+#   6. DNS: CNAME gaeclip.sanding.online -> <ID>.cfargotunnel.com
+#      (or `cloudflared tunnel route dns <ID> gaeclip.sanding.online`)
+#   7. docker compose --profile tunnel up -d
+#
+# Single origin design: UI + API share https://gaeclip.sanding.online,
+# so the browser never hits CORS/PNA/mixed-content. Do NOT change the
+# /api/* rule order — it must stay above the catch-all.
+#
+# SECURITY: this tunnel exposes the API to the internet. Set these in .env
+# before starting it:
+#   PUBLIC_MODE=true
+#   API_AUTH_TOKEN=<long-random-secret>
+# Then enter the same token in Settings -> Koneksi API. Without the token
+# the backend refuses to start in public mode.
+
+tunnel: PASTE_TUNNEL_ID_HERE
+credentials-file: /etc/cloudflared/tunnel.json
+
+ingress:
+  # Backend API (and health probes) by path prefix.
+  - hostname: gaeclip.sanding.online
+    path: /api/*
+    service: http://app:8000
+  - hostname: gaeclip.sanding.online
+    path: /health/*
+    service: http://app:8000
+  # Frontend UI: everything else.
+  - hostname: gaeclip.sanding.online
+    service: http://app:3000
+  # Required last rule.
+  - service: http_status:404

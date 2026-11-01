@@ -33,6 +33,13 @@ describe("settings search", () => {
   it("short queries return nothing", () => {
     assert.deepEqual(searchSettings("x", fields, tabFor, catFor), []);
   });
+
+  it("finds social areas by provider and intent keywords", () => {
+    for (const q of ["youtube", "tiktok", "oauth", "credential", "publish", "account"]) {
+      const hits = searchSettings(q, fields, tabFor, catFor);
+      assert.ok(hits.some((h) => h.category === "social"), `no social hit for ${q}`);
+    }
+  });
 });
 
 describe("fallback order", () => {

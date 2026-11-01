@@ -13,7 +13,7 @@ from .downloader import download_audio, download_subtitles, download_video_secti
 from .errors import CancelledError, ValidationError
 from .media import render_static_vertical, subtitle_chars_per_line
 from .storage import JobStorage, new_job_id
-from .subtitles import parse_srt, parse_vtt, write_ass
+from .subtitles import normalize_max_words_per_line, parse_srt, parse_vtt, write_ass
 from .transcription import transcribe_with_whisper
 from .visual import FaceObservation, build_speaker_timeline, make_layout_instructions
 
@@ -25,6 +25,19 @@ class GeneratedClip:
     title: str = ""
     score: float = 0.0
     reason: str = ""
+    # Transcript span (seconds) backing this clip; persisted into the job
+    # record so later features (e.g. social metadata) can slice context
+    # without re-deriving timing.
+    start: float = 0.0
+    end: float = 0.0
+    # Publication metadata generated during the pipeline run (spec: clip
+    # leaves creation with description+hashtags ready). Empty when the clip
+    # predates the feature or generation failed; the Publish form then
+    # falls back to manual generation.
+    description: str = ""
+    hashtags: tuple = ()
+    metadata_source: str = ""
+    metadata_updated_at: float | None = None
 
 
 @dataclass
@@ -129,6 +142,56 @@ def _log_framing_qc(output: Path, clip_id: str, job_name: str,
                        job_name, clip_id, exc)
 
 
+def _clip_metadata_best_effort(*, lines, candidate, metadata, language,
+                                duration_seconds, client, settings, ai_chain,
+                                job_id, index, total) -> dict:
+    """Generate publication metadata for one finished clip (never raises).
+
+    Runs inline after render using in-memory context only: the candidate's
+    logical span slices the transcript, the raw yt-dlp metadata supplies
+    source title/channel. Any metadata problem (including a broken local
+    fallback) yields ``source="failed"`` with empty fields — the clip and
+    job still complete, and Publish falls back to manual generation.
+    """
+    from .clip_metadata import (
+        ClipMetadataContext,
+        generate_clip_metadata_safe,
+        slice_span_text,
+    )
+
+    span_text, span_lang = slice_span_text(lines, candidate.start, candidate.end)
+    source_title = str(metadata.get("title") or metadata.get("fulltitle") or "")
+    source_channel = str(metadata.get("channel") or metadata.get("uploader") or "")
+    ctx = ClipMetadataContext(
+        job_id=job_id, clip_id=candidate.candidate_id,
+        source_title=source_title, source_channel=source_channel,
+        clip_title=candidate.title, clip_reason=candidate.reason,
+        clip_duration=duration_seconds,
+        language=span_lang or language or "id",
+        span_text=span_text,
+    )
+    logger.info("[CLIP_METADATA] generating job=%s clip=%s (%d/%d)",
+                job_id, candidate.candidate_id, index + 1, total)
+    try:
+        return generate_clip_metadata_safe(
+            ctx, client=client, settings=settings, ai_chain=ai_chain)
+    except Exception as exc:
+        # generate_clip_metadata_safe only lets CancelledError through, but
+        # keep this frame total-safe: metadata must never fail a clip.
+        from .errors import CancelledError as _Cancelled
+
+        if isinstance(exc, _Cancelled):
+            raise
+        import time as _time
+
+        logger.info("[CLIP_METADATA] failed job=%s clip=%s (%s); storing empty package",
+                    job_id, candidate.candidate_id, type(exc).__name__)
+        return {
+            "description": "", "hashtags": [], "source": "failed",
+            "provider": None, "model": None, "updated_at": _time.time(),
+        }
+
+
 def _build_pool_ctx(redis_client, ai_chain, job_id):
     """Assemble the Gemini provider pool context for one job.
 
@@ -164,6 +227,8 @@ def generate_from_url(
     debug_framing: bool = False,
     subtitle_style: str = "casual_center",
     subtitle_position: str = "bottom_center",
+    subtitle_max_words_per_line: int | None = None,
+    branding: dict | None = None,
     ai_chain: list[str] | None = None,
     redis_client=None,
     adopt_transcript_job_id: str | None = None,
@@ -577,13 +642,15 @@ def generate_from_url(
                     max_chars=subtitle_chars_per_line(out_w, out_h),
                     width=out_w, height=out_h,
                     style=subtitle_style, position=subtitle_position,
+                    max_words=normalize_max_words_per_line(subtitle_max_words_per_line),
                 )
                 logger.info(
                     "Job %s clip %s subtitle: style=%s position=%s format=ass "
-                    "font=%s size=%d alignment=%d video=%dx%d",
+                    "font=%s size=%d alignment=%d video=%dx%d max_words=%d",
                     storage.job_root.name, candidate.candidate_id,
                     style_cfg.style, style_cfg.position, style_cfg.font_name,
                     style_cfg.font_size, style_cfg.alignment, out_w, out_h,
+                    normalize_max_words_per_line(subtitle_max_words_per_line),
                 )
             else:
                 output_dir.mkdir(parents=True, exist_ok=True)
@@ -681,12 +748,68 @@ def generate_from_url(
             )
             keyframes = list(getattr(plan, "keyframes", []) or [])
             routed = False
+            brand_plan = None
+            brand_cfg = branding or {}
+            if brand_cfg.get("enabled"):
+                from .branding import (
+                    prepare_avatar,
+                    resolve_brand_font,
+                    resolve_brand_plan,
+                    validate_brand_config,
+                )
+                from .channel_avatar import (
+                    assets_dir as _brand_assets_dir,
+                    fetch_channel_avatar,
+                    resolve_asset_path,
+                )
+
+                try:
+                    norm_brand = validate_brand_config(brand_cfg)
+                    resolve_brand_font()
+                    if burn_subtitles:
+                        geo_w, geo_h = out_w, out_h
+                    else:
+                        from .media import resolve_output_geometry as _brand_geo
+
+                        geo_w, geo_h = _brand_geo(source)
+                    avatar_src = None
+                    asset = norm_brand.get("avatar_asset")
+                    if asset:
+                        avatar_src = resolve_asset_path(
+                            asset, _brand_assets_dir(settings.storage_root))
+                        if avatar_src is None:
+                            logger.warning(
+                                "Job %s clip %s branding: asset %r tidak ditemukan; fallback tanpa avatar",
+                                storage.job_root.name, candidate.candidate_id, asset)
+                    if avatar_src is None and norm_brand.get("channel_name"):
+                        avatar_src = fetch_channel_avatar(
+                            brand_cfg.get("channel_id"),
+                            brand_cfg.get("channel_url"),
+                            _brand_assets_dir(settings.storage_root))
+                    circle = None
+                    if avatar_src is not None:
+                        circle = prepare_avatar(
+                            avatar_src, 512,
+                            output_dir / f"{candidate.candidate_id}_avatar.png")
+                    brand_plan = resolve_brand_plan(
+                        norm_brand, end - start, geo_w, geo_h, circle,
+                        burn_subtitles, out_fps)
+                    if brand_plan is not None:
+                        logger.info(
+                            "Job %s clip %s branding: template=%s window=%.1f-%.1fs avatar=%s",
+                            storage.job_root.name, candidate.candidate_id,
+                            brand_plan.template, brand_plan.window[0],
+                            brand_plan.window[1],
+                            "yes" if brand_plan.show_avatar else "no")
+                except ValueError as exc:
+                    raise ValidationError(str(exc)) from exc
             if keyframes and len(keyframes) >= 2 and framing_mode.startswith("auto"):
                 try:
                     render_trajectory_vertical(
                         source, output, keyframes, fps=out_fps,
                         duration=end - start, subtitles=subtitle_file,
                         preset=render_preset, crf=render_crf,
+                        branding=brand_plan,
                     )
                     routed = True
                 except Exception as exc:
@@ -700,6 +823,7 @@ def generate_from_url(
                     render_dynamic_vertical(
                         source, output, instructions, subtitles=subtitle_file,
                         fps=out_fps, preset=render_preset, crf=render_crf,
+                        branding=brand_plan,
                     )
                     if debug_framing:
                         from .autoframing import dump_active_speaker_log
@@ -725,6 +849,7 @@ def generate_from_url(
                     render_static_vertical(
                         source, output, start=0, duration=end - start, subtitles=subtitle_file,
                         fps=out_fps, preset=render_preset, crf=render_crf,
+                        branding=brand_plan,
                     )
             try:
                 size_bytes = output.stat().st_size
@@ -742,9 +867,20 @@ def generate_from_url(
             task.duration_seconds = round(end - start, 3)
             task.size_bytes = size_bytes
             _sync_tasks()
+            meta = _clip_metadata_best_effort(
+                lines=lines, candidate=candidate, metadata=metadata,
+                language=language, duration_seconds=round(end - start, 3),
+                client=redis_client, settings=settings, ai_chain=ai_chain,
+                job_id=storage.job_root.name, index=index, total=total,
+            )
             clips.append(GeneratedClip(
                 candidate_id=candidate.candidate_id, path=output,
                 title=candidate.title, score=candidate.score, reason=candidate.reason,
+                start=candidate.start, end=candidate.end,
+                description=meta["description"],
+                hashtags=tuple(meta["hashtags"]),
+                metadata_source=meta["source"],
+                metadata_updated_at=meta["updated_at"],
             ))
         except CancelledError:
             raise

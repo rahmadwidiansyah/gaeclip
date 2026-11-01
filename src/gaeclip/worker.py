@@ -11,6 +11,30 @@ from .pipeline import generate_from_url
 logger = logging.getLogger(__name__)
 
 
+def _clip_entry(clip: Any, task_lookup: dict[str, Any]) -> dict[str, Any]:
+    """Serializable clips[] entry incl. pipeline-generated pub metadata.
+
+    Readers must use .get() for the metadata keys: clips predating the
+    feature (and render-failed clips) don't carry them.
+    """
+    task = task_lookup.get(clip.candidate_id)
+    return {
+        "clip_id": clip.candidate_id,
+        "path": str(clip.path),
+        "title": clip.title,
+        "score": clip.score,
+        "reason": clip.reason,
+        "start": clip.start,
+        "end": clip.end,
+        "duration_seconds": task.duration_seconds if task else None,
+        "size_bytes": task.size_bytes if task else None,
+        "description": getattr(clip, "description", "") or "",
+        "hashtags": list(getattr(clip, "hashtags", ()) or []),
+        "metadata_source": getattr(clip, "metadata_source", "") or "",
+        "metadata_updated_at": getattr(clip, "metadata_updated_at", None),
+    }
+
+
 def _redis():
     # Delegates to the runtime factory. Server (default) returns the exact
     # same redis.Redis client as before; desktop returns the SQLite shim.
@@ -123,6 +147,23 @@ def process_job(job_id: str) -> None:
             on_metadata=save_metadata,
             subtitle_style=getattr(record, "subtitle_style", None) or "casual_center",
             subtitle_position=getattr(record, "subtitle_position", None) or "bottom_center",
+            subtitle_max_words_per_line=getattr(record, "subtitle_max_words_per_line", None),
+            branding={
+                "enabled": getattr(record, "brand_enabled", False),
+                "template": getattr(record, "brand_template", None) or "glass_end",
+                "channel_name": getattr(record, "brand_channel_name", None),
+                "avatar_asset": getattr(record, "brand_avatar_asset", None),
+                "display_mode": getattr(record, "brand_display_mode", None) or "avatar_name",
+                "position": getattr(record, "brand_position", None) or "top_left",
+                "timing": getattr(record, "brand_timing", None) or "last",
+                "duration": getattr(record, "brand_duration", None) or 2.0,
+                "blur": getattr(record, "brand_blur", None),
+                "dim": getattr(record, "brand_dim", None),
+                "animation": getattr(record, "brand_animation", None) or "fade",
+                "additional_text": getattr(record, "brand_additional_text", None),
+                "channel_id": (record.video or {}).get("channel_id"),
+                "channel_url": (record.video or {}).get("channel_url"),
+            },
             ai_chain=_resolve_ai_chain(repository.client, job_settings, job_id),
             redis_client=repository.client,
             adopt_transcript_job_id=_adopt_parent,
@@ -188,20 +229,7 @@ def process_job(job_id: str) -> None:
             task.clip_id: task
             for task in (result.clip_tasks or [])
         }
-        clips = [
-            {
-                "clip_id": clip.candidate_id,
-                "path": str(clip.path),
-                "title": clip.title,
-                "score": clip.score,
-                "reason": clip.reason,
-                "duration_seconds": task_lookup.get(clip.candidate_id).duration_seconds
-                if task_lookup.get(clip.candidate_id) else None,
-                "size_bytes": task_lookup.get(clip.candidate_id).size_bytes
-                if task_lookup.get(clip.candidate_id) else None,
-            }
-            for clip in result.clips
-        ]
+        clips = [_clip_entry(clip, task_lookup) for clip in result.clips]
         clip_tasks = [task.to_dict() for task in (result.clip_tasks or [])]
         failed_tasks = [task for task in (result.clip_tasks or []) if task.status == "failed"]
         final_status = "partial" if failed_tasks else "completed"
@@ -305,5 +333,32 @@ def refresh_task():
     @app.task(name="gaeclip.refresh_metadata")
     def task(job_id: str):
         return refresh_video_metadata(job_id)
+
+    return app, task
+
+
+def process_publish(publish_job_id: str) -> dict:
+    """Celery/local entry point for one social publish job (spec §22).
+
+    Runs the SocialPublishService state machine synchronously. Safe to
+    re-run (terminal jobs are idempotent no-ops; active jobs resume).
+    """
+    from .runtime.factory import is_desktop
+    from .social.service import SocialPublishService
+
+    service = SocialPublishService(_redis(), runtime="desktop" if is_desktop() else "server")
+    job = service.execute(publish_job_id)
+    return {"publish_job_id": job.id, "status": job.status,
+            "remote_media_id": job.remote_media_id}
+
+
+def publish_task():
+    """Return (app, task) for the social publish queue."""
+    from celery import Celery
+    app = Celery("gaeclip", broker=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"))
+
+    @app.task(name="gaeclip.publish_clip")
+    def task(publish_job_id: str):
+        return process_publish(publish_job_id)
 
     return app, task
